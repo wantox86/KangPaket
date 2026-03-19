@@ -1,0 +1,95 @@
+# =============================================================================
+# KangPaket — .gitignore
+# =============================================================================
+
+# ------ Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+MANIFEST
+
+# ------ Virtual environment ---------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# ------ PyInstaller -----------------------------------------------------------
+*.spec
+build/
+dist/
+
+# ------ Generated assets (rebuilt by build.sh) --------------------------------
+assets/*.icns
+
+# ------ Distribution / packaging ----------------------------------------------
+.Python
+sdist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# ------ Testing ---------------------------------------------------------------
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# ------ Jupyter ---------------------------------------------------------------
+.ipynb_checkpoints
+
+# ------ pyenv -----------------------------------------------------------------
+.python-version
+
+# ------ IDE -------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ------ KangPaket user data (local only, not checked in) ---------------------
+data/profiles/*.json
+data/runner_results/*.json
+data/settings.json
+
+# Keep placeholder files
+!data/profiles/.gitkeep
+!data/runner_results/.gitkeep
+
+# ------ Logs ------------------------------------------------------------------
+*.log
+logs/
+
+# ------ macOS -----------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V3
+.Trashes
+.AppleDouble
+.LSOverride
+
+# ------ Windows ---------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ------ Linux -----------------------------------------------------------------
+*~
