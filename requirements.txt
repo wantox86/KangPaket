@@ -1,0 +1,5 @@
+customtkinter>=5.2.0
+httpx>=0.27.0
+Pillow>=10.0.0
+jsonpath-ng>=1.6.0
+pyinstaller>=6.0.0

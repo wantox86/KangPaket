@@ -1,0 +1,14 @@
+[project]
+name = "kangpaket"
+version = "1.0.0"
+description = "Internal HTTP API Client Desktop App"
+requires-python = ">=3.11"
+dependencies = [
+    "customtkinter>=5.2.0",
+    "httpx>=0.27.0",
+    "Pillow>=10.0.0",
+    "jsonpath-ng>=1.6.0",
+]
+
+[project.scripts]
+kangpaket = "main:main"

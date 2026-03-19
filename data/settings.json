@@ -1,0 +1,12 @@
+{
+  "default_timeout": 30.0,
+  "follow_redirects": true,
+  "verify_ssl": true,
+  "max_response_size_mb": 10,
+  "theme": "dark",
+  "font_size": 13,
+  "default_collection": "Default",
+  "proxy_enabled": false,
+  "proxy_http": "",
+  "proxy_https": ""
+}
