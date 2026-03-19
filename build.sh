@@ -12,9 +12,10 @@ set -euo pipefail
 
 APP_NAME="KangPaket"
 ENTRY="main.py"
-ICON_WIN="assets/icon.ico"
-ICON_MAC="assets/icon.png"
-ICON_LIN="assets/icon.png"
+ICON_SRC="assets/KangPaket-ico.png"   # Source icon (PNG)
+ICON_WIN="assets/KangPaket-ico.png"
+ICON_MAC="assets/KangPaket-ico.icns"  # Will be generated from PNG
+ICON_LIN="assets/KangPaket-ico.png"
 
 # Detect platform
 PLATFORM="${1:-auto}"
@@ -30,8 +31,20 @@ fi
 echo "▶  Building KangPaket for: $PLATFORM"
 echo "   Entry: $ENTRY"
 
+# Resolve Python: prefer local .venv, then python3, then python
+if [ -x ".venv/bin/python" ]; then
+    PYTHON=".venv/bin/python"
+elif command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "❌ Python tidak ditemukan."
+    exit 1
+fi
+
 # Ensure PyInstaller is available
-if ! python -m PyInstaller --version &>/dev/null 2>&1; then
+if ! $PYTHON -m PyInstaller --version &>/dev/null 2>&1; then
     echo "❌ PyInstaller tidak ditemukan. Install dengan: pip install pyinstaller"
     exit 1
 fi
@@ -57,7 +70,22 @@ COMMON=(
 case "$PLATFORM" in
     macos)
         echo "   Building macOS .app bundle…"
-        python -m PyInstaller \
+
+        # Convert PNG → .icns using built-in macOS tools
+        echo "   Converting icon PNG → ICNS…"
+        ICONSET_DIR="assets/KangPaket-ico.iconset"
+        mkdir -p "$ICONSET_DIR"
+        for size in 16 32 64 128 256 512; do
+            sips -z $size $size "$ICON_SRC" \
+                --out "$ICONSET_DIR/icon_${size}x${size}.png"      &>/dev/null
+            sips -z $((size*2)) $((size*2)) "$ICON_SRC" \
+                --out "$ICONSET_DIR/icon_${size}x${size}@2x.png"   &>/dev/null
+        done
+        iconutil -c icns "$ICONSET_DIR" -o "$ICON_MAC"
+        rm -rf "$ICONSET_DIR"
+        echo "   ICNS generated: $ICON_MAC"
+
+        $PYTHON -m PyInstaller \
             "${COMMON[@]}" \
             --windowed \
             --icon "$ICON_MAC" \
@@ -68,7 +96,7 @@ case "$PLATFORM" in
 
     windows)
         echo "   Building Windows .exe…"
-        python -m PyInstaller \
+        $PYTHON -m PyInstaller \
             "${COMMON[@]}" \
             --windowed \
             --icon "$ICON_WIN" \
@@ -78,7 +106,7 @@ case "$PLATFORM" in
 
     linux)
         echo "   Building Linux binary…"
-        python -m PyInstaller \
+        $PYTHON -m PyInstaller \
             "${COMMON[@]}" \
             --windowed \
             --icon "$ICON_LIN" \
