@@ -1,0 +1,19 @@
+{
+  "id": "9d39f4aa-349b-4b01-a770-be7c3f628fca",
+  "name": "template",
+  "collection": "Mockoon",
+  "method": "GET",
+  "url": "http://localhost:3000/template",
+  "headers": {},
+  "params": {},
+  "body_type": "none",
+  "body_content": "",
+  "body_form": {},
+  "auth_type": "none",
+  "auth_data": {},
+  "timeout": null,
+  "follow_redirects": true,
+  "verify_ssl": true,
+  "created_at": "2026-03-19T05:47:53.114136Z",
+  "updated_at": "2026-03-19T05:48:00.033485Z"
+}
