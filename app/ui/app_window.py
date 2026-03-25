@@ -8,7 +8,7 @@ import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 import customtkinter as ctk
 
-from app.config import APP_TITLE
+from app.config import APP_TITLE, ASSETS_DIR
 from app.core.profile_manager import ProfileManager
 from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
@@ -32,10 +32,32 @@ class AppWindow:
         self._root.title(APP_TITLE)
         self._root.geometry("1280x780")
         self._root.minsize(900, 600)
+        self._set_window_icon()
 
         self._build_layout()
         self._build_menu()
         self._bind_shortcuts()
+
+    # ------------------------------------------------------------------
+    # Window icon
+    # ------------------------------------------------------------------
+
+    def _set_window_icon(self) -> None:
+        import os, sys
+        ico_path = os.path.join(ASSETS_DIR, "KangPaket-ico.ico")
+        png_path = os.path.join(ASSETS_DIR, "KangPaket-ico.png")
+        try:
+            if sys.platform == "win32" and os.path.exists(ico_path):
+                self._root.iconbitmap(ico_path)
+            elif os.path.exists(png_path):
+                from PIL import Image, ImageTk
+                img = Image.open(png_path)
+                photo = ImageTk.PhotoImage(img)
+                self._root.iconphoto(True, photo)
+                # Keep reference so it's not garbage-collected
+                self._icon_photo = photo
+        except Exception as e:
+            print(f"[AppWindow] Could not set window icon: {e}")
 
     # ------------------------------------------------------------------
     # Layout
@@ -58,6 +80,8 @@ class AppWindow:
             on_new_request=self._new_request,
             on_open_dialog=self._open_save_dialog,
             on_run_collection=self._open_runner,
+            on_delete=self._on_profile_deleted,
+            on_delete_collection=self._on_collection_deleted,
         )
         self._sidebar.pack(side="left", fill="y")
 
@@ -84,6 +108,7 @@ class AppWindow:
             on_response=self._on_response,
             on_status=self._status_bar.set_text,
             on_save=self._open_save_dialog,
+            on_delete=self._on_delete_profile,
         )
         self._paned.add(self._request_panel, minsize=220)
 
@@ -151,9 +176,32 @@ class AppWindow:
     # ------------------------------------------------------------------
 
     def _on_profile_select(self, profile: RequestProfile) -> None:
-        self._request_panel.load_profile(profile)
+        self._request_panel.load_profile(profile, is_saved=True)
         self._response_panel.clear()
         self._status_bar.set_text(f"Loaded: {profile.name}")
+
+    def _on_delete_profile(self, profile_id: str) -> None:
+        """Delete profil dari disk (dipanggil dari tombol Delete di request panel)."""
+        try:
+            self._pm.delete_profile(profile_id)
+        except RuntimeError as e:
+            mb.showerror("Delete Failed", str(e))
+            return
+        self._new_request()
+        self._sidebar.refresh(keep_selection=False)
+        self._status_bar.set_text("Profile deleted.")
+
+    def _on_profile_deleted(self, profile_id: str) -> None:
+        """Dipanggil dari sidebar saat profil dihapus via context menu."""
+        if self._request_panel._current_profile_id == profile_id:
+            self._new_request()
+            self._status_bar.set_text("Profile deleted.")
+
+    def _on_collection_deleted(self, deleted_ids: list[str]) -> None:
+        """Dipanggil dari sidebar saat collection dihapus."""
+        if self._request_panel._current_profile_id in deleted_ids:
+            self._new_request()
+        self._status_bar.set_text(f"Collection deleted ({len(deleted_ids)} request(s) removed).")
 
     def _new_request(self) -> None:
         empty = RequestProfile(
@@ -200,6 +248,7 @@ class AppWindow:
         self._pm.save_profile(profile)
         self._request_panel._current_profile_id = profile.id
         self._request_panel._clear_dirty()
+        self._request_panel._delete_btn.configure(state="normal")
         self._sidebar.refresh(keep_selection=True)
         self._sidebar.select_profile(profile.id)
         self._status_bar.set_text(f"Saved: {profile.name}")

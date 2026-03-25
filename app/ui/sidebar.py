@@ -21,16 +21,20 @@ class Sidebar(ctk.CTkFrame):
         on_new_request: callable | None = None,
         on_open_dialog: callable | None = None,
         on_run_collection: callable | None = None,
+        on_delete: callable | None = None,
+        on_delete_collection: callable | None = None,
         **kwargs,
     ) -> None:
         super().__init__(parent, width=SIDEBAR_WIDTH, corner_radius=0, **kwargs)
         self.pack_propagate(False)
 
-        self._pm                 = profile_manager
-        self._on_select          = on_select           # callback(RequestProfile)
-        self._on_new_request     = on_new_request      # callback()
-        self._on_open_dialog     = on_open_dialog      # callback(profile)
-        self._on_run_collection  = on_run_collection   # callback(collection_name)
+        self._pm                      = profile_manager
+        self._on_select               = on_select             # callback(RequestProfile)
+        self._on_new_request          = on_new_request        # callback()
+        self._on_open_dialog          = on_open_dialog        # callback(profile)
+        self._on_run_collection       = on_run_collection     # callback(collection_name)
+        self._on_delete               = on_delete             # callback(profile_id: str)
+        self._on_delete_collection    = on_delete_collection  # callback(deleted_ids: list[str])
 
         # Track collapsed state per collection
         self._collapsed: dict[str, bool] = {}
@@ -162,6 +166,18 @@ class Sidebar(ctk.CTkFrame):
         )
         col_btn.pack(side="left", fill="x", expand=True, padx=2)
 
+        # Delete collection button (×)
+        ctk.CTkButton(
+            hdr,
+            text="×",
+            width=24, height=24,
+            font=("Segoe UI", 13, "bold"),
+            fg_color="transparent",
+            hover_color="#7f1d1d",
+            text_color="#f87171",
+            command=lambda c=collection: self._delete_collection(c),
+        ).pack(side="right", padx=(0, 2))
+
         # Run collection button (▶)
         ctk.CTkButton(
             hdr,
@@ -173,6 +189,13 @@ class Sidebar(ctk.CTkFrame):
             text_color="#49cc90",
             command=lambda c=collection: self._run_collection(c),
         ).pack(side="right", padx=2)
+
+        # Right-click context menu on collection header
+        for widget in (hdr, col_btn):
+            widget.bind(
+                "<Button-2>" if self._is_mac() else "<Button-3>",
+                lambda event, c=collection, n=len(profiles): self._show_collection_menu(event, c, n),
+            )
 
         if is_collapsed:
             return
@@ -307,10 +330,52 @@ class Sidebar(ctk.CTkFrame):
             f"Delete '{profile.name}'?\nThis action cannot be undone.",
             icon="warning",
         ):
-            self._pm.delete_profile(profile.id)
-            if self._selected_id == profile.id:
+            deleted_id = profile.id
+            self._pm.delete_profile(deleted_id)
+            if self._selected_id == deleted_id:
                 self._selected_id = None
             self.refresh(keep_selection=False)
+            if self._on_delete:
+                self._on_delete(deleted_id)
+
+    def _show_collection_menu(self, event: tk.Event, collection: str, count: int) -> None:
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(
+            label=f"Run '{collection}'",
+            command=lambda: self._run_collection(collection),
+        )
+        menu.add_separator()
+        menu.add_command(
+            label=f"Delete Collection ({count} request{'s' if count != 1 else ''})",
+            command=lambda: self._delete_collection(collection),
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _delete_collection(self, collection: str) -> None:
+        import tkinter.messagebox as mb
+        profiles = self._pm.get_profiles_by_collection().get(collection, [])
+        count = len(profiles)
+        msg = (
+            f"Delete collection '{collection}'?\n\n"
+            f"This will permanently delete {count} request{'s' if count != 1 else ''}.\n"
+            "This action cannot be undone."
+        )
+        if not mb.askyesno("Delete Collection", msg, icon="warning"):
+            return
+
+        deleted_ids = self._pm.delete_collection(collection)
+
+        # Clear selection if active profile was in this collection
+        if self._selected_id in deleted_ids:
+            self._selected_id = None
+
+        self.refresh(keep_selection=False)
+
+        if self._on_delete_collection:
+            self._on_delete_collection(deleted_ids)
 
     def _run_collection(self, collection: str) -> None:
         if self._on_run_collection:
