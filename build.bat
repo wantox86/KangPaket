@@ -56,22 +56,10 @@ if exist dist\ rmdir /s /q dist\
 del /q *.spec 2>nul
 
 REM Run PyInstaller
+REM Note: --collect-all customtkinter and darkdetect must be WITHOUT quotes around
+REM the module name, and both must be collected for customtkinter to work on Windows.
 echo   Running PyInstaller...
-%PYTHON% -m PyInstaller ^
-    --noconfirm ^
-    --clean ^
-    --name "%APP_NAME%" ^
-    --windowed ^
-    --icon "%ICON_ICO%" ^
-    --add-data "data;data" ^
-    --add-data "assets;assets" ^
-    --hidden-import "customtkinter" ^
-    --hidden-import "PIL" ^
-    --hidden-import "PIL.Image" ^
-    --hidden-import "httpx" ^
-    --hidden-import "jsonpath_ng" ^
-    --collect-all "customtkinter" ^
-    "%ENTRY%"
+%PYTHON% -m PyInstaller --noconfirm --clean --name %APP_NAME% --windowed --icon %ICON_ICO% --add-data "data;data" --add-data "assets;assets" --collect-all customtkinter --collect-all darkdetect --hidden-import customtkinter --hidden-import darkdetect --hidden-import tkinter --hidden-import _tkinter --hidden-import PIL --hidden-import PIL.Image --hidden-import httpx --hidden-import jsonpath_ng %ENTRY%
 
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
