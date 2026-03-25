@@ -1,7 +1,8 @@
 # CLAUDE.md — KangPaket
 
-> Internal HTTP API Client Desktop App  
+> Internal HTTP API Client Desktop App
 > Postman-equivalent, built with Python, lightweight, production-ready.
+> **Versi saat ini: 1.0.1**
 
 ---
 
@@ -29,7 +30,8 @@ kangpaket/
 ├── requirements.txt
 ├── pyproject.toml
 ├── main.py                        # Entry point
-├── build.sh                       # Script build PyInstaller
+├── build.sh                       # Script build PyInstaller (Linux/macOS)
+├── build.bat                      # Script build PyInstaller (Windows)
 │
 ├── app/
 │   ├── __init__.py
@@ -74,8 +76,8 @@ kangpaket/
 │   └── settings.json              # File pengaturan global app
 │
 └── assets/
-    ├── icon.png
-    └── icon.ico
+    ├── KangPaket-ico.png          # Icon fallback (macOS/Linux)
+    └── KangPaket-ico.ico          # Icon Windows (titlebar & taskbar)
 ```
 
 ---
@@ -196,6 +198,15 @@ class RunnerResult:
 def load_all_profiles() -> list[RequestProfile]
 def save_profile(profile: RequestProfile) -> None
 def delete_profile(profile_id: str) -> None
+def delete_collection(collection_name: str) -> list[str]
+    # Hapus semua profil dalam satu collection. Return list ID yang dihapus.
+def get_profile(profile_id: str) -> RequestProfile | None
+def duplicate_profile(profile: RequestProfile) -> RequestProfile
+    # UUID baru, nama + " (copy)"
+def get_collections() -> list[str]
+    # Sorted unique collection names
+def get_profiles_by_collection() -> dict[str, list[RequestProfile]]
+    # Profil dikelompokkan & di-sort per collection
 def export_profiles(profiles: list[RequestProfile], path: str) -> None
 def import_profiles(path: str) -> list[RequestProfile]
     # Import: jika ID konflik, generate UUID baru.
@@ -242,7 +253,10 @@ def import_profiles(path: str) -> list[RequestProfile]
 def load_settings() -> dict
 def save_settings(settings: dict) -> None
 def get(key: str, default=None)
-def set(key: str, value) -> None
+def set(key: str, value) -> None   # auto-save setelah set
+def reset_to_defaults() -> None
+@property
+def all() -> dict                  # copy dari seluruh settings
 ```
 
 ### 4.4 `app/core/runner_engine.py`
@@ -263,6 +277,7 @@ class RunnerEngine:
         on_item_done: Callable[[RunItemResult], None],   # callback per item selesai
         on_progress: Callable[[int, int], None],         # callback (done, total)
         on_finished: Callable[[RunnerResult], None],     # callback saat semua selesai
+        csv_data: list[dict] | None = None,              # data CSV untuk variable substitution
     ) -> None:
         # Dijalankan di thread terpisah (threading.Thread)
         # Jangan block main thread tkinter
@@ -299,7 +314,13 @@ class RunnerEngine:
    - `header_equals(header_name: str, expected_value: str)`
    - Jika assertion gagal → `RunItemResult.status = "failed"`, lanjut atau stop sesuai `stop_on_failure`
 
-4. **Callback thread-safety:**
+4. **Variable substitution via CSV:**
+   - `csv_data` adalah list of dict (hasil `csv.DictReader`)
+   - Placeholder `{{ColumnName}}` dalam url, headers, params, body_content, body_form, auth_data → diganti nilai dari row CSV per iterasi
+   - Jika `csv_data` diberikan, `iteration_count` diabaikan — jumlah iterasi = jumlah baris CSV
+   - Placeholder tidak dikenal → dibiarkan as-is
+
+5. **Callback thread-safety:**
    - Semua callback (`on_item_done`, `on_progress`, `on_finished`) harus dipanggil via `root.after(0, callback)` agar aman untuk update UI tkinter dari thread background.
 
 ---
@@ -491,41 +512,74 @@ Dialog modal (`CTkToplevel`) yang muncul setelah user memilih file Postman `.jso
 ### 6.1 `app/ui/app_window.py` — Main Window
 
 **Layout:**
-- Title bar: `KangPaket — Internal API Client`
+- Title bar: `KangPaket`
 - Menu bar: `File | Tools | Help`
 - Layout utama: 3-panel horizontal
   - **Kiri (220px fixed):** Sidebar profil
-  - **Tengah (flex):** Request panel
-  - **Kanan/Bawah:** Response panel (bisa split horizontal atau tab bawah)
-- Status bar di paling bawah
+  - **Tengah/Atas (flex):** Request panel
+  - **Bawah:** Response panel (vertical PanedWindow, resizable)
+- Status bar di paling bawah (26px)
+
+**Window Icon:**
+- Windows: `assets/KangPaket-ico.ico` via `iconbitmap()` (titlebar & taskbar)
+- macOS/Linux: `assets/KangPaket-ico.png` via `PIL + iconphoto()`
+- Graceful fallback jika file tidak ditemukan
 
 **Menu `File`:**
-- New Request → buat request kosong baru
-- Save Profile → simpan request aktif sebagai profil
-- Export Profiles → ekspor semua/selected profil ke JSON
+- New Request (Ctrl+N) → buat request kosong baru
+- Save Profile (Ctrl+S) → simpan request aktif sebagai profil
+- Export Profiles (Ctrl+E) → ekspor semua profil ke JSON
 - Import Profiles → impor dari file JSON (format KangPaket)
 - **Import from Postman** → buka file dialog pilih `.json` → buka `PostmanImportDialog`
-- Settings → buka `SettingsDialog`
+- Settings (Ctrl+,) → buka `SettingsDialog`
 - Exit
 
 **Menu `Tools`:**
 - Collection Runner → buka `runner_window.py`
-- Clear Response
+- Clear Response (Ctrl+L)
 - Copy Response Body
 - Copy as cURL
 
 **Menu `Help`:**
 - About KangPaket
 
+**Keyboard Shortcuts:**
+- `Ctrl+N` → New Request
+- `Ctrl+S` → Save Profile
+- `Ctrl+Enter` → Send Request
+- `Ctrl+,` → Settings
+- `Ctrl+E` → Export Profiles
+- `Ctrl+L` → Clear Response
+
+**Callbacks ke Sidebar:**
+- `on_delete(profile_id)` → hapus profil dari request panel jika aktif
+- `on_delete_collection(deleted_ids)` → sama, untuk bulk delete collection
+
 ### 6.2 `app/ui/sidebar.py` — Panel Kiri
 
 **Fitur:**
-- Search bar (filter profil by nama/URL)
+- Search bar (filter real-time by nama/URL/method)
 - Daftar profil dikelompokkan per collection (expandable/collapsible)
 - Klik profil → muat ke request panel
-- Right-click context menu: Rename, Duplicate, Delete, Move to Collection
-- Tombol `+` di atas untuk new request
-- Tombol import/export kecil di pojok bawah sidebar
+- Tombol `+` di header untuk new request
+
+**Collection header row (per collection):**
+- Tombol label collection (klik → toggle collapse/expand)
+- Tombol `▶` (hijau) → Run Collection (buka RunnerWindow dengan collection pre-selected)
+- Tombol `×` (merah) → Delete Collection (konfirmasi, hapus semua profil)
+- Klik kanan pada header → context menu: `Run '<nama>'`, `Delete Collection (N requests)`
+
+**Profile rows:**
+- Method badge (warna sesuai METHOD_COLORS, 3 huruf)
+- Nama profil (klik untuk load)
+- Klik kanan → context menu: `Open`, `Rename…`, `Duplicate`, `Move to Collection…`, `Delete`
+
+**Callbacks:**
+- `on_select(profile)` → load ke request panel
+- `on_new_request()` → buat request baru
+- `on_run_collection(name)` → buka runner
+- `on_delete(profile_id)` → notifikasi profile dihapus
+- `on_delete_collection(deleted_ids)` → notifikasi collection dihapus (list ID)
 
 ### 6.3 `app/ui/request_panel.py` — Panel Request
 
@@ -533,37 +587,49 @@ Dialog modal (`CTkToplevel`) yang muncul setelah user memilih file Postman `.jso
 
 1. **URL Bar Row:**
    - Dropdown method (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) — warna berbeda per method
-   - Entry URL (lebar penuh)
-   - Tombol **SEND** (prominent)
-   - Tombol **Save**
+   - Entry URL (monospace font, lebar penuh)
+   - Tombol **SEND** (biru prominent)
+   - Tombol **Save** — menampilkan `"Save •"` jika ada perubahan belum disimpan (dirty flag)
+   - Tombol **Delete** (merah, disabled saat profil belum tersimpan ke disk; aktif setelah Save)
 
 2. **Tab request:** `Params | Headers | Body | Auth | Settings`
 
    **Tab Params:**
    - `KeyValueEditor` widget (tabel: enabled checkbox | key | value | delete)
-   - Params ini di-append ke URL sebagai query string
+   - Params di-append ke URL sebagai query string
 
    **Tab Headers:**
    - `KeyValueEditor` widget
-   - Preset dropdown: tambah header umum (Content-Type, Accept, Authorization, dll)
+   - Quick-add buttons: `Content-Type: JSON`, `Content-Type: XML`, `Accept: JSON`, `Accept: Any`
 
    **Tab Body:**
    - Radio: `None | Raw | Form Data | x-www-form-urlencoded`
-   - Jika Raw: dropdown Content-Type (JSON, XML, Text, HTML) + TextArea multi-line
+   - Jika Raw: dropdown Content-Type (JSON, XML, Text, HTML, JS) + tombol **Format JSON** + TextArea multi-line
    - Jika Form Data/URL-encoded: `KeyValueEditor`
-   - Jika Raw JSON: tombol "Format JSON" untuk pretty-print
 
    **Tab Auth:**
-   - Dropdown: `No Auth | Bearer Token | Basic Auth | API Key`
+   - Dropdown: `none | bearer | basic | api-key`
    - Form dinamis sesuai pilihan:
      - Bearer: input token
-     - Basic: input username + password
-     - API Key: input key name + value + lokasi (header/query param)
+     - Basic: input username + password (password masked)
+     - API Key: input key name + value + lokasi radio (`header` / `query param`)
 
    **Tab Settings (per-request override):**
-   - Timeout (override global, atau biarkan kosong)
+   - Timeout (override global, kosong = pakai global)
    - Follow Redirects (checkbox)
    - Verify SSL (checkbox)
+
+**Method API:**
+- `load_profile(profile, is_saved=False)` → populate semua field; `is_saved=True` mengaktifkan tombol Delete
+- `get_current_profile()` → build `RequestProfile` dari state UI saat ini
+- `clear_profile()` → reset `_current_profile_id` dan disable tombol Delete
+- `apply_settings()` → update font size dari settings
+
+**Callbacks:**
+- `on_response(ResponseResult)` → kirim ke response panel
+- `on_status(str)` → update status bar
+- `on_save(profile)` → buka ProfileDialog
+- `on_delete(profile_id)` → hapus profil dari disk, refresh sidebar
 
 ### 6.4 `app/ui/response_panel.py` — Panel Response
 
@@ -574,26 +640,34 @@ Dialog modal (`CTkToplevel`) yang muncul setelah user memilih file Postman `.jso
 
 **Tab response:** `Body | Headers | Cookies | Info`
 
+**Status bar response (atas tab):**
+- Status code + text (warna: hijau 2xx, kuning 3xx, merah 4xx/5xx)
+- Elapsed time (ms)
+- Size (bytes/KB/MB)
+- Tombol Copy (body ke clipboard)
+- Tombol Save to File (auto-detect extension dari Content-Type)
+
 **Tab Body:**
 - Auto-detect Content-Type → format display:
-  - `application/json` → JSON viewer dengan syntax highlight + pretty print
-  - `text/html` → tampil sebagai raw text
-  - `image/*` → tampil sebagai gambar
+  - `application/json` atau body dimulai dengan `{`/`[` → JSON viewer syntax-highlighted + pretty print
+  - `image/*` → label "[Image response — use Save to File]"
   - Lainnya → raw text
 - Toggle: Pretty | Raw
-- Tombol Copy, tombol Save to File
+- Warning banner jika ukuran body melebihi `max_response_size_mb` (truncated)
 
 **Tab Headers:**
 - Tabel read-only: Header Name | Value
 - Tombol Copy All Headers
 
 **Tab Cookies:**
-- Tabel: Name | Value | Domain | Path | Expires
+- Parse `Set-Cookie` headers → tabel: Name | Value | Domain | Path | Expires
+- Label "No cookies" jika kosong
 
 **Tab Info:**
-- Request URL (final setelah redirect jika ada)
-- HTTP version
 - Timestamp request
+- Status code + text
+- Elapsed time
+- Size
 - Error message (jika ada)
 
 ### 6.5 `app/ui/widgets/key_value_editor.py`
@@ -662,12 +736,13 @@ Window top-level terpisah (`CTkToplevel`) yang bisa dibuka dari menu `Tools → 
 
 **Bagian Configuration:**
 - **Run Name:** text input, default otomatis: `"Run - <collection> - <timestamp>"`
-- **Collection dropdown:** pilih collection → auto-populate checklist profil di bawahnya
+- **Collection dropdown:** pilih collection → auto-populate checklist profil di bawahnya + tombol refresh
+- **Data File (CSV):** Browse + Clear buttons; jika dipilih, `{{ColumnName}}` di URL/headers/body/auth diganti nilai per baris CSV; jumlah iterasi = jumlah baris CSV (override Iterations)
+  - Info label menampilkan: jumlah baris, nama kolom yang terdeteksi
 - **Ordered checklist profil:**
-  - Setiap item: checkbox (include/exclude) | nama profil | method badge | URL (truncated)
-  - Drag-and-drop untuk reorder (atau tombol ↑ ↓ per item jika drag-drop sulit)
+  - Setiap item: checkbox (include/exclude) | method badge | nama profil | URL (truncated)
   - Tombol "Select All" / "Deselect All"
-- **Iterations:** spinbox integer (min 1, max 100)
+- **Iterations:** spinbox integer (min 1, max 100) — diabaikan jika CSV dipakai
 - **Delay (ms):** spinbox integer (min 0, max 60000)
 - **Mode:** radio button Sequential / Parallel
 - **Stop on failure:** checkbox
@@ -676,7 +751,7 @@ Window top-level terpisah (`CTkToplevel`) yang bisa dibuka dari menu `Tools → 
 - `CTkProgressBar` dengan nilai 0.0 → 1.0
 - Label teks: `8 / 15 requests`
 - Summary chips: `✅ Passed: 6 | ❌ Failed: 2 | ⚠ Error: 0 | ⏭ Skipped: 0`
-- Elapsed time counter (update setiap detik)
+- Elapsed time counter (update setiap 1 detik selama run)
 
 **Tombol aksi:**
 - `▶ RUN` — mulai runner, disable tombol Run, enable Stop
@@ -748,127 +823,96 @@ if __name__ == "__main__":
 
 ## 9. Sprint Plan
 
-### Sprint 1 — Foundation & Core Engine
+> **Status: Semua sprint selesai (v1.0.1)**
+
+### Sprint 1 — Foundation & Core Engine ✅
 **Goal:** Aplikasi bisa kirim request dan tampilkan response.
 
-- [ ] Setup project structure & `requirements.txt`
-- [ ] Implement `RequestProfile` dan `ResponseResult` dataclass
-- [ ] Implement `http_client.py`:
-  - Semua method HTTP
-  - Auth: none, bearer, basic
-  - Body: none, raw, form-data, url-encoded
-  - Error handling lengkap
-- [ ] Implement `settings_manager.py` dengan defaults
-- [ ] Main window layout (3-panel skeleton dengan CustomTkinter)
-- [ ] URL bar + method dropdown + SEND button
-- [ ] Response panel: Body (raw text) + status code display
-- [ ] **Test:** Manual test ke public API (httpbin.org secara lokal atau mock)
+- [x] Setup project structure & `requirements.txt`
+- [x] Implement `RequestProfile` dan `ResponseResult` dataclass
+- [x] Implement `http_client.py` (semua method, auth, body types, error handling)
+- [x] Implement `settings_manager.py` dengan defaults
+- [x] Main window layout (3-panel skeleton dengan CustomTkinter)
+- [x] URL bar + method dropdown + SEND button
+- [x] Response panel: Body (raw text) + status code display
 
-### Sprint 2 — Request Builder Lengkap
+### Sprint 2 — Request Builder Lengkap ✅
 **Goal:** Tab Params, Headers, Body, Auth semua fungsional.
 
-- [ ] Implement `KeyValueEditor` widget
-- [ ] Tab Params → auto-append ke URL sebagai query string
-- [ ] Tab Headers → merge dengan default headers
-- [ ] Tab Body → semua mode (none/raw/form/urlencoded)
-- [ ] Tab Auth → bearer, basic, api-key
-- [ ] Tab Settings (per-request override timeout/ssl/redirect)
-- [ ] Dropdown Content-Type di body raw
-- [ ] Tombol "Format JSON" di body raw
+- [x] Implement `KeyValueEditor` widget
+- [x] Tab Params → auto-append ke URL sebagai query string
+- [x] Tab Headers → merge dengan default headers + quick-add preset buttons
+- [x] Tab Body → semua mode (none/raw/form/urlencoded) + tombol Format JSON
+- [x] Tab Auth → bearer, basic, api-key (header/query param)
+- [x] Tab Settings (per-request override timeout/ssl/redirect)
 
-### Sprint 3 — Response Panel & JSON Viewer
+### Sprint 3 — Response Panel & JSON Viewer ✅
 **Goal:** Response ditampilkan dengan baik, syntax-highlighted.
 
-- [ ] Implement `json_viewer.py` dengan syntax highlighting
-- [ ] Auto-detect Content-Type response → pilih renderer
-- [ ] Tab Body: toggle Pretty/Raw, tombol Copy, Save to File
-- [ ] Tab Headers response (tabel read-only)
-- [ ] Tab Cookies
-- [ ] Tab Info (URL final, timestamp, error)
-- [ ] Status bar response (status code berwarna, elapsed, size)
-- [ ] Truncation warning untuk response besar
+- [x] Implement `json_viewer.py` dengan syntax highlighting (7 token types)
+- [x] Auto-detect Content-Type response → pilih renderer
+- [x] Tab Body: toggle Pretty/Raw, tombol Copy, Save to File
+- [x] Tab Headers response (tabel read-only + Copy All)
+- [x] Tab Cookies (parse Set-Cookie headers)
+- [x] Tab Info (timestamp, status, elapsed, size, error)
+- [x] Status bar response (status code berwarna, elapsed, size)
+- [x] Truncation warning banner untuk response besar
 
-### Sprint 4 — Profile Manager & Sidebar
+### Sprint 4 — Profile Manager & Sidebar ✅
 **Goal:** Simpan, muat, kelola request profiles.
 
-- [ ] Implement `profile_manager.py` (CRUD ke disk)
-- [ ] Sidebar: daftar profil grouped by collection
-- [ ] Search/filter profil
-- [ ] Klik profil → load ke request panel
-- [ ] Context menu sidebar: rename, duplicate, delete, move collection
-- [ ] Tombol + new request
-- [ ] Save Profile dialog (`profile_dialog.py`): input nama, pilih collection
-- [ ] "Unsaved changes" indicator di URL bar
+- [x] Implement `profile_manager.py` (CRUD ke disk, duplicate, delete collection)
+- [x] Sidebar: daftar profil grouped by collection (collapsible)
+- [x] Search/filter profil real-time (by nama/URL/method)
+- [x] Klik profil → load ke request panel
+- [x] Context menu profil: Open, Rename, Duplicate, Move to Collection, Delete
+- [x] Context menu collection header: Run, Delete Collection
+- [x] Tombol × pada collection header → delete collection (bulk)
+- [x] Tombol ▶ pada collection header → run collection
+- [x] Tombol + new request di header
+- [x] Save Profile dialog (`profile_dialog.py`): input nama, pilih collection existing atau baru
+- [x] "Unsaved changes" dirty flag di tombol Save (teks "Save •")
+- [x] Tombol Delete di URL bar (merah, aktif hanya untuk profil tersimpan)
 
-### Sprint 5 — Export/Import & Settings Dialog
+### Sprint 5 — Export/Import & Settings Dialog ✅
 **Goal:** Portabilitas profil dan konfigurasi global.
 
-- [ ] Export profil ke JSON (semua / selected)
-- [ ] Import profil dari JSON (handle ID conflict, nama conflict)
-- [ ] `settings_dialog.py` lengkap (semua field)
-- [ ] Apply settings ke http_client (timeout, ssl, redirect, proxy)
-- [ ] Theme switching (dark/light) via CustomTkinter
-- [ ] Font size setting diterapkan ke semua widget text
+- [x] Export profil ke JSON dengan metadata (version, exported_at)
+- [x] Import profil dari JSON (handle ID conflict, nama conflict)
+- [x] `settings_dialog.py` lengkap (semua field + Reset to Defaults)
+- [x] Apply settings ke http_client (timeout, ssl, redirect, proxy)
+- [x] Theme switching (dark/light/system) via CustomTkinter
+- [x] Font size setting diterapkan ke URL entry dan body textarea
 
-### Sprint 6 — Polish, Menu & Utilities
+### Sprint 6 — Polish, Menu & Utilities ✅
 **Goal:** App siap pakai untuk tim internal.
 
-- [ ] Menu bar lengkap (File/Tools/Help) termasuk entri "Import from Postman"
-- [ ] "Copy as cURL" feature
-- [ ] Status bar bawah (connection info, last request time)
-- [ ] Keyboard shortcuts: Ctrl+Enter (Send), Ctrl+S (Save), Ctrl+N (New)
-- [ ] Error dialog untuk request gagal (dengan pesan detail)
-- [ ] About dialog
-- [ ] `build.sh` script PyInstaller untuk Windows/macOS/Linux
-- [ ] `README.md` lengkap (instalasi, build, usage)
+- [x] Menu bar lengkap (File/Tools/Help)
+- [x] "Copy as cURL" feature (builder dari RequestProfile)
+- [x] Status bar bawah (last request method, status, elapsed, size)
+- [x] Keyboard shortcuts: Ctrl+Enter, Ctrl+S, Ctrl+N, Ctrl+,, Ctrl+E, Ctrl+L
+- [x] Error dialog dengan contextual tips (timeout, SSL, connection, invalid URL)
+- [x] About dialog (versi, Python, platform, libraries)
+- [x] Window icon platform-specific (KangPaket-ico.ico / .png)
+- [x] `build.sh` + `build.bat` script PyInstaller
 
-### Sprint 7 — Collection Runner
+### Sprint 7 — Collection Runner ✅
 **Goal:** Fitur runner berjalan end-to-end: eksekusi multi-request, live progress, assertions, export hasil.
 
-- [ ] Implement `RunnerConfig`, `RunItemResult`, `RunnerResult` dataclass di `runner_model.py`
-- [ ] Implement `runner_engine.py`:
-  - Sequential mode dengan delay dan stop-on-failure
-  - Parallel mode dengan `ThreadPoolExecutor`
-  - Semua 7 jenis assertion
-  - Callback thread-safe via `root.after(0, ...)`
-  - `stop()` method
-- [ ] Implement `runner_result_row.py` widget (collapsed + expanded state)
-- [ ] Implement `runner_window.py`:
-  - Configuration panel (collection dropdown, ordered checklist, options)
-  - Progress bar + summary chips (live update)
-  - Scrollable results list (live append)
-  - Tombol RUN / STOP / Export Results
-- [ ] Integrasi ke `app_window.py`:
-  - Menu `Tools → Collection Runner`
-  - Sidebar context menu kanan collection: "Run Collection" → buka runner window dengan collection pre-selected
-- [ ] Export hasil runner ke JSON dan CSV
-- [ ] Tombol "Open in Main Window" dari expanded row fungsional
-- [ ] **Test:** Jalankan runner dengan 5+ profil campuran (success/fail), verifikasi progress live dan hasil assertions akurat
+- [x] Implement `RunnerConfig`, `RunItemResult`, `RunnerResult` dataclass
+- [x] Implement `runner_engine.py` (sequential + parallel, 7 assertions, CSV substitution, thread-safe callbacks)
+- [x] Implement `runner_result_row.py` widget (collapsed + expanded dengan assertions table)
+- [x] Implement `runner_window.py` (config panel, CSV data file, progress, live results, export JSON/CSV)
+- [x] Integrasi ke menu Tools → Collection Runner + sidebar ▶ button
+- [x] Tombol "Open in Main Window" dari expanded row
 
-### Sprint 8 — Postman Collection Importer
+### Sprint 8 — Postman Collection Importer ✅
 **Goal:** User bisa import file `.postman_collection.json` (v2.0 & v2.1) langsung menjadi profil KangPaket.
 
-- [ ] Implement `PostmanImportResult` dataclass di `runner_model.py` (atau file baru `postman_model.py`)
-- [ ] Implement `postman_importer.py`:
-  - Deteksi & validasi format v2.0 vs v2.1 dari `info.schema`
-  - Rekursif parse folder nested → flatten ke sub-collection
-  - Mapping lengkap: method, URL, params, headers, body (semua mode), auth (bearer/basic/apikey)
-  - Handle Postman variables `{{...}}` → biarkan as-is + catat warning
-  - Handle auth level collection vs level request
-  - `PostmanImportError` untuk file tidak valid
-- [ ] Implement `postman_import_dialog.py`:
-  - Preview list request dengan status icon (✅/⚠️/❌)
-  - Checkbox per item (include/exclude)
-  - Dropdown target collection (existing atau baru)
-  - Collapsible warnings section
-  - Tombol "Import N Request" dengan counter dinamis
-  - Toast notification setelah import sukses
-- [ ] Integrasi ke menu `File → Import from Postman`:
-  - File dialog filter `*.json`
-  - Jalankan parser → jika error tampilkan dialog error detail
-  - Jika sukses buka `PostmanImportDialog`
-  - Setelah import → refresh sidebar
-- [ ] **Test:** Import collection Postman publik (misal Petstore, JSONPlaceholder) — verifikasi semua request ter-parse dengan benar, warnings muncul untuk variable/script, item file-upload ter-skip dengan benar
+- [x] Implement `PostmanImportResult` dataclass di `postman_importer.py`
+- [x] Implement `postman_importer.py` (v2.0 & v2.1, nested folder flatten, semua body/auth mode, warnings)
+- [x] Implement `postman_import_dialog.py` (checklist, target collection, collapsible warnings, dynamic button label)
+- [x] Integrasi ke menu File → Import from Postman (file dialog, error dialog, sidebar refresh)
 
 ---
 
@@ -942,7 +986,7 @@ if __name__ == "__main__":
 
 Fitur berikut **tidak** diimplementasikan di V1:
 - WebSocket / GraphQL / gRPC support
-- Environment variables / variable substitution dalam URL/header
+- Global environment variables (substitusi `{{var}}` di luar konteks CSV runner)
 - Request chaining dengan data passing antar request (response body request A → body request B)
 - Team sync / cloud storage
 - History log request otomatis
@@ -952,6 +996,8 @@ Fitur berikut **tidak** diimplementasikan di V1:
 - Postman import: OpenAPI / Swagger / Insomnia format
 - Postman import: environment variables substitution otomatis
 - Postman import: OAuth2 / AWS Signature auth conversion
+
+> **Catatan:** Variable substitution `{{ColumnName}}` **sudah diimplementasikan** di Collection Runner via CSV Data File (per-iterasi, per-baris CSV). Ini berbeda dari "global environment variables" yang belum ada.
 
 ---
 
@@ -964,11 +1010,15 @@ pip install -r requirements.txt
 # Run development
 python main.py
 
-# Build executable (Windows)
-pyinstaller --onefile --windowed --icon=assets/icon.ico --name=KangPaket main.py
+# Build executable (Windows) — via script
+build.bat
+# atau manual:
+pyinstaller --onefile --windowed --icon=assets/KangPaket-ico.ico --name=KangPaket main.py
 
-# Build executable (macOS)
-pyinstaller --onefile --windowed --icon=assets/icon.png --name=KangPaket main.py
+# Build executable (macOS/Linux) — via script
+bash build.sh
+# atau manual:
+pyinstaller --onefile --windowed --icon=assets/KangPaket-ico.png --name=KangPaket main.py
 ```
 
 Output binary akan ada di `dist/KangPaket` atau `dist/KangPaket.exe`.
@@ -977,11 +1027,11 @@ Output binary akan ada di `dist/KangPaket` atau `dist/KangPaket.exe`.
 
 ## Notes untuk Claude Code
 
-1. **Mulai dari Sprint 1** — jangan skip ke sprint berikutnya sebelum sprint sebelumnya selesai dan terverifikasi fungsional.
-2. **Test setelah setiap sprint** — jalankan `python main.py` untuk verifikasi UI muncul dan fitur sprint tersebut bekerja.
+1. **Semua sprint sudah selesai** — jangan implementasi ulang fitur yang sudah ada, cukup modifikasi jika ada bug atau request perubahan.
+2. **Versi saat ini: 1.0.1** — update `APP_VERSION` di `app/config.py` dan `pyproject.toml` saat ada rilis baru.
 3. **Jangan install library tambahan** di luar `requirements.txt` tanpa konfirmasi dulu.
-4. **Jika ada ambiguitas di spec ini**, pilih implementasi yang paling simpel dan konsisten dengan yang sudah ada.
-5. **CustomTkinter reference:** https://github.com/TomSchimansky/CustomTkinter
-6. **httpx reference:** https://www.python-httpx.org/
-7. **Postman Collection v2.1 schema reference:** https://schema.postman.com/collection/json/v2.1.0/draft-07/collection.json
-8. **Untuk Sprint 8 test:** gunakan collection publik dari https://www.postman.com/explore atau export collection dari Postman yang sudah ada di tim.
+4. **Jika ada ambiguitas**, pilih implementasi yang paling simpel dan konsisten dengan yang sudah ada.
+5. **Test setelah setiap perubahan** — jalankan `python main.py` untuk verifikasi UI muncul dan fitur bekerja.
+6. **CustomTkinter reference:** https://github.com/TomSchimansky/CustomTkinter
+7. **httpx reference:** https://www.python-httpx.org/
+8. **Postman Collection v2.1 schema reference:** https://schema.postman.com/collection/json/v2.1.0/draft-07/collection.json
