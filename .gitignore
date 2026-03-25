@@ -26,8 +26,9 @@ ENV/
 build/
 dist/
 
-# ------ Generated assets (rebuilt by build.sh) --------------------------------
+# ------ Generated assets (rebuilt by build scripts) --------------------------
 assets/*.icns
+assets/*.ico
 
 # ------ Distribution / packaging ----------------------------------------------
 .Python

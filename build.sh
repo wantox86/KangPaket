@@ -13,7 +13,7 @@ set -euo pipefail
 APP_NAME="KangPaket"
 ENTRY="main.py"
 ICON_SRC="assets/KangPaket-ico.png"   # Source icon (PNG)
-ICON_WIN="assets/KangPaket-ico.png"
+ICON_WIN="assets/KangPaket-ico.ico"
 ICON_MAC="assets/KangPaket-ico.icns"  # Will be generated from PNG
 ICON_LIN="assets/KangPaket-ico.png"
 
@@ -39,13 +39,13 @@ elif command -v python3 &>/dev/null; then
 elif command -v python &>/dev/null; then
     PYTHON="python"
 else
-    echo "❌ Python tidak ditemukan."
+    echo "❌ Python not found."
     exit 1
 fi
 
 # Ensure PyInstaller is available
 if ! $PYTHON -m PyInstaller --version &>/dev/null 2>&1; then
-    echo "❌ PyInstaller tidak ditemukan. Install dengan: pip install pyinstaller"
+    echo "❌ PyInstaller not found. Install with: pip install pyinstaller"
     exit 1
 fi
 
@@ -91,17 +91,27 @@ case "$PLATFORM" in
             --icon "$ICON_MAC" \
             --osx-bundle-identifier "com.internal.kangpaket" \
             "$ENTRY"
-        echo "✅ Build selesai: dist/$APP_NAME.app"
+        echo "✅ Build complete: dist/$APP_NAME.app"
         ;;
 
     windows)
         echo "   Building Windows .exe…"
+
+        # Convert PNG → .ico using Pillow
+        echo "   Converting icon PNG → ICO…"
+        $PYTHON -c "
+from PIL import Image
+img = Image.open('$ICON_SRC')
+img.save('$ICON_WIN', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
+"
+        echo "   ICO generated: $ICON_WIN"
+
         $PYTHON -m PyInstaller \
             "${COMMON[@]}" \
             --windowed \
             --icon "$ICON_WIN" \
             "$ENTRY"
-        echo "✅ Build selesai: dist/$APP_NAME.exe"
+        echo "✅ Build complete: dist/$APP_NAME.exe"
         ;;
 
     linux)
@@ -111,15 +121,15 @@ case "$PLATFORM" in
             --windowed \
             --icon "$ICON_LIN" \
             "$ENTRY"
-        echo "✅ Build selesai: dist/$APP_NAME"
+        echo "✅ Build complete: dist/$APP_NAME"
         ;;
 
     *)
-        echo "❌ Platform tidak dikenali: $PLATFORM"
-        echo "   Gunakan: ./build.sh [macos|windows|linux]"
+        echo "❌ Unknown platform: $PLATFORM"
+        echo "   Usage: ./build.sh [macos|windows|linux]"
         exit 1
         ;;
 esac
 
 echo ""
-echo "📦 Output ada di: dist/$APP_NAME"
+echo "📦 Output: dist/$APP_NAME"
