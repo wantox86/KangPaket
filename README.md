@@ -38,18 +38,21 @@ python main.py
 
 ## Build Executable
 
+**macOS / Linux** — run in a terminal:
 ```bash
-# macOS
 ./build.sh macos       # → dist/KangPaket.app
-
-# Linux
 ./build.sh linux       # → dist/KangPaket
-
-# Windows (run on a Windows machine)
-build.sh windows       # → dist/KangPaket.exe
 ```
 
-> The build script automatically converts the PNG icon to `.icns` on macOS using the built-in `sips` and `iconutil` tools.
+**Windows** — run in Command Prompt or PowerShell:
+```bat
+build.bat              # → dist\KangPaket.exe
+```
+
+> **Icon conversion is automatic:**
+> - macOS: PNG → `.icns` via built-in `sips` + `iconutil`
+> - Windows: PNG → `.ico` via Pillow (included in `requirements.txt`)
+> - Generated icon files are excluded from version control via `.gitignore`
 
 ## Keyboard Shortcuts
 

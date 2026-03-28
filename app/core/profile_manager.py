@@ -76,6 +76,19 @@ class ProfileManager:
         except (json.JSONDecodeError, OSError):
             return None
 
+    def delete_collection(self, collection_name: str) -> list[str]:
+        """Hapus semua profil dalam satu collection. Return list ID yang dihapus."""
+        profiles = self.load_all_profiles()
+        deleted_ids: list[str] = []
+        for profile in profiles:
+            if profile.collection == collection_name:
+                try:
+                    self.delete_profile(profile.id)
+                    deleted_ids.append(profile.id)
+                except RuntimeError as e:
+                    print(f"[ProfileManager] Gagal hapus profil {profile.id}: {e}")
+        return deleted_ids
+
     def duplicate_profile(self, profile: RequestProfile) -> RequestProfile:
         """Duplikat profil dengan UUID baru dan nama + ' (copy)'."""
         import copy

@@ -3,7 +3,7 @@ KangPaket — App-wide constants and configuration.
 """
 
 APP_NAME = "KangPaket"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_TITLE = "KangPaket"
 USER_AGENT = "KangPaket/1.0"
 

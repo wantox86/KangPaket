@@ -25,6 +25,7 @@ class RequestPanel(ctk.CTkFrame):
         on_response=None,
         on_status=None,
         on_save=None,
+        on_delete=None,
         **kwargs,
     ):
         super().__init__(parent, corner_radius=0, **kwargs)
@@ -32,6 +33,7 @@ class RequestPanel(ctk.CTkFrame):
         self._on_response  = on_response   # callback(ResponseResult)
         self._on_status    = on_status     # callback(str)
         self._on_save      = on_save       # callback(RequestProfile) → opens ProfileDialog
+        self._on_delete    = on_delete     # callback(profile_id: str)
         self._http_client  = HttpClient()
         self._sending      = False
         self._current_profile_id: str | None = None  # ID profil yang sedang dibuka
@@ -99,7 +101,22 @@ class RequestPanel(ctk.CTkFrame):
             hover_color="#4b5563",
             command=self._save_profile,
         )
-        self._save_btn.pack(side="left")
+        self._save_btn.pack(side="left", padx=(0, 6))
+
+        # Delete button (only active when a saved profile is loaded)
+        self._delete_btn = ctk.CTkButton(
+            bar,
+            text="Delete",
+            width=60,
+            height=36,
+            font=("Segoe UI", 12),
+            fg_color="#374151",
+            hover_color="#7f1d1d",
+            text_color="#f87171",
+            state="disabled",
+            command=self._delete_profile,
+        )
+        self._delete_btn.pack(side="left")
 
     # ------------------------------------------------------------------
     # Tabs
@@ -455,8 +472,10 @@ class RequestPanel(ctk.CTkFrame):
     # Public API
     # ------------------------------------------------------------------
 
-    def load_profile(self, profile: RequestProfile) -> None:
+    def load_profile(self, profile: RequestProfile, is_saved: bool = False) -> None:
         self._current_profile_id = profile.id
+        # Enable delete only for profiles that exist on disk
+        self._delete_btn.configure(state="normal" if is_saved else "disabled")
         self._method_var.set(profile.method)
         self._apply_method_color()
         self._url_var.set(profile.url)
@@ -637,6 +656,20 @@ class RequestPanel(ctk.CTkFrame):
         if self._on_save:
             self._on_save(self.get_current_profile())
 
+    def _delete_profile(self) -> None:
+        if not self._current_profile_id or not self._on_delete:
+            return
+        import tkinter.messagebox as mb
+        # Get current profile name for confirmation message
+        profile = self.get_current_profile()
+        name = profile.name if profile.name and profile.name != "Untitled" else "this profile"
+        if mb.askyesno(
+            "Delete Profile",
+            f"Delete '{name}'?\nThis action cannot be undone.",
+            icon="warning",
+        ):
+            self._on_delete(self._current_profile_id)
+
     def _mark_dirty(self) -> None:
         if not self._is_dirty:
             self._is_dirty = True
@@ -645,6 +678,11 @@ class RequestPanel(ctk.CTkFrame):
     def _clear_dirty(self) -> None:
         self._is_dirty = False
         self._save_btn.configure(text="Save")
+
+    def clear_profile(self) -> None:
+        """Reset panel to empty state (called after profile deletion)."""
+        self._current_profile_id = None
+        self._delete_btn.configure(state="disabled")
 
     # ------------------------------------------------------------------
     # Helpers
