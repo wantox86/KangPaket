@@ -56,10 +56,10 @@ if exist dist\ rmdir /s /q dist\
 del /q *.spec 2>nul
 
 REM Run PyInstaller
-REM Note: --collect-all customtkinter and darkdetect must be WITHOUT quotes around
-REM the module name, and both must be collected for customtkinter to work on Windows.
+REM --onefile     : pack Python runtime + all libs into a single .exe (no _internal folder)
+REM --collect-all : must be WITHOUT quotes around module name
 echo   Running PyInstaller...
-%PYTHON% -m PyInstaller --noconfirm --clean --name %APP_NAME% --windowed --icon %ICON_ICO% --add-data "data;data" --add-data "assets;assets" --collect-all customtkinter --collect-all darkdetect --hidden-import customtkinter --hidden-import darkdetect --hidden-import tkinter --hidden-import _tkinter --hidden-import PIL --hidden-import PIL.Image --hidden-import httpx --hidden-import jsonpath_ng %ENTRY%
+%PYTHON% -m PyInstaller --noconfirm --clean --onefile --name %APP_NAME% --windowed --icon %ICON_ICO% --add-data "data;data" --add-data "assets;assets" --collect-all customtkinter --collect-all darkdetect --hidden-import customtkinter --hidden-import darkdetect --hidden-import tkinter --hidden-import _tkinter --hidden-import PIL --hidden-import PIL.Image --hidden-import httpx --hidden-import jsonpath_ng %ENTRY%
 
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
@@ -67,5 +67,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Build complete: dist\%APP_NAME%.exe
+echo Build complete: dist\%APP_NAME%.exe  (single self-contained .exe, no Python required)
+echo The .exe runs without Python installed on the target machine.
 endlocal
