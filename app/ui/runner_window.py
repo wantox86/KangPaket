@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import queue
 import time
 import tkinter.filedialog as fd
 import customtkinter as ctk
@@ -41,11 +42,26 @@ class RunnerWindow(ctk.CTkToplevel):
         self._pm              = profile_manager
         self._settings        = settings
         self._on_open_profile = on_open_profile
-        self._engine          = RunnerEngine(HttpClient(), settings, tk_root=self)
+        self._engine          = RunnerEngine(HttpClient(), settings, tk_root=None)
         self._runner_result: RunnerResult | None = None
         self._running         = False
         self._start_time: float = 0.0
         self._elapsed_job: str | None = None
+
+        # Thread-safe queue for batching UI updates from worker thread
+        self._result_queue: queue.Queue[RunItemResult | None] = queue.Queue()
+        self._flush_job: str | None = None
+
+        # Running counters — avoid O(n) scan on every progress callback
+        self._count_passed  = 0
+        self._count_failed  = 0
+        self._count_errors  = 0
+        self._count_skipped = 0
+        self._count_done    = 0
+        self._count_total   = 0
+
+        # Max rows rendered as full widgets; beyond this only counters update
+        self._MAX_RENDERED_ROWS = 500
 
         # Ordered checklist items: list of (profile, BooleanVar)
         self._checklist: list[tuple[RequestProfile, ctk.BooleanVar]] = []
@@ -429,8 +445,23 @@ class RunnerWindow(ctk.CTkToplevel):
         self._result_rows.clear()
         self._runner_result = None
 
+        # Reset counters
+        self._count_passed  = 0
+        self._count_failed  = 0
+        self._count_errors  = 0
+        self._count_skipped = 0
+        self._count_done    = 0
+        self._count_total   = len(selected) * iters
+
+        # Drain any leftover items from a previous run
+        while not self._result_queue.empty():
+            try:
+                self._result_queue.get_nowait()
+            except queue.Empty:
+                break
+
         # Update counters
-        total = len(selected) * iters
+        total = self._count_total
         self._progress_bar.set(0)
         self._prog_label.configure(text=f"0 / {total}")
         self._passed_label.configure(text="✅ 0")
@@ -445,14 +476,15 @@ class RunnerWindow(ctk.CTkToplevel):
         self._running = True
         self._start_time = time.monotonic()
         self._tick_elapsed()
+        self._schedule_flush()
 
         profiles = [p for p, _ in selected]
         self._engine.run(
             config=config,
             profiles=profiles,
-            on_item_done=self._on_item_done,
-            on_progress=self._on_progress,
-            on_finished=self._on_finished,
+            on_item_done=self._enqueue_item,
+            on_progress=self._enqueue_progress,
+            on_finished=lambda r: self.after(0, self._on_finished, r),
             csv_data=csv_data,
         )
 
@@ -461,39 +493,101 @@ class RunnerWindow(ctk.CTkToplevel):
         self._stop_btn.configure(state="disabled")
 
     # ------------------------------------------------------------------
+    # Queue-based batched UI updates (thread-safe, no event-loop flooding)
+    # ------------------------------------------------------------------
+
+    def _enqueue_item(self, item: RunItemResult) -> None:
+        """Called from worker thread — just enqueue, never touch widgets here."""
+        self._result_queue.put(item)
+
+    def _enqueue_progress(self, done: int, total: int) -> None:
+        """Progress is derived from the queue; this callback is intentionally a no-op."""
+        pass
+
+    def _schedule_flush(self) -> None:
+        """Schedule the next flush tick (every 100 ms)."""
+        if self._flush_job is not None:
+            self.after_cancel(self._flush_job)
+        self._flush_job = self.after(100, self._flush_queue)
+
+    def _flush_queue(self) -> None:
+        """Drain up to 50 items from the queue and update the UI in one batch."""
+        BATCH = 50
+        processed = 0
+
+        while processed < BATCH:
+            try:
+                item = self._result_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            # Update running counters
+            self._count_done += 1
+            if item.status == "success":
+                self._count_passed += 1
+            elif item.status == "failed":
+                self._count_failed += 1
+            elif item.status == "error":
+                self._count_errors += 1
+            elif item.status == "skipped":
+                self._count_skipped += 1
+
+            # Only create widgets up to the render limit
+            if len(self._result_rows) < self._MAX_RENDERED_ROWS:
+                index = len(self._result_rows) + 1
+                row = RunnerResultRow(
+                    self._results_scroll,
+                    item=item,
+                    index=index,
+                    on_open_main=self._on_open_main,
+                )
+                row.pack(fill="x", pady=2)
+                self._result_rows.append(row)
+                self._results_scroll._parent_canvas.yview_moveto(1.0)
+            elif len(self._result_rows) == self._MAX_RENDERED_ROWS:
+                # Show a single "overflow" notice instead of more widgets
+                ctk.CTkLabel(
+                    self._results_scroll,
+                    text=f"⚡ Displaying first {self._MAX_RENDERED_ROWS} rows. All results will be available in Export.",
+                    font=("Segoe UI", 10),
+                    text_color="#fca130",
+                    anchor="w",
+                ).pack(fill="x", padx=8, pady=4)
+                self._result_rows.append(None)  # sentinel so this branch runs once
+
+            processed += 1
+
+        # Refresh progress labels once per flush (not per item)
+        if processed > 0:
+            done  = self._count_done
+            total = self._count_total
+            pct   = done / total if total > 0 else 0
+            self._progress_bar.set(pct)
+            self._prog_label.configure(text=f"{done} / {total}")
+            self._passed_label.configure(text=f"✅ {self._count_passed}")
+            self._failed_label.configure(text=f"❌ {self._count_failed}")
+            self._error_label.configure(text=f"⚠ {self._count_errors}")
+            self._skip_label.configure(text=f"⏭ {self._count_skipped}")
+
+        # Keep flushing while running or while queue still has items
+        if self._running or not self._result_queue.empty():
+            self._schedule_flush()
+        else:
+            self._flush_job = None
+
+    # ------------------------------------------------------------------
     # Callbacks (called on main thread via root.after)
     # ------------------------------------------------------------------
 
     def _on_item_done(self, item: RunItemResult) -> None:
-        index = len(self._result_rows) + 1
-        row = RunnerResultRow(
-            self._results_scroll,
-            item=item,
-            index=index,
-            on_open_main=self._on_open_main,
-        )
-        row.pack(fill="x", pady=2)
-        self._result_rows.append(row)
-        # Scroll to bottom
-        self._results_scroll._parent_canvas.yview_moveto(1.0)
-
-    def _on_progress(self, done: int, total: int) -> None:
-        pct = done / total if total > 0 else 0
-        self._progress_bar.set(pct)
-        self._prog_label.configure(text=f"{done} / {total}")
-
-        passed  = sum(1 for r in self._result_rows if r._item.status == "success")
-        failed  = sum(1 for r in self._result_rows if r._item.status == "failed")
-        errors  = sum(1 for r in self._result_rows if r._item.status == "error")
-        skipped = sum(1 for r in self._result_rows if r._item.status == "skipped")
-        self._passed_label.configure(text=f"✅ {passed}")
-        self._failed_label.configure(text=f"❌ {failed}")
-        self._error_label.configure(text=f"⚠ {errors}")
-        self._skip_label.configure(text=f"⏭ {skipped}")
+        """Legacy direct callback — kept for completeness, not used when batching."""
+        pass
 
     def _on_finished(self, result: RunnerResult) -> None:
         self._runner_result = result
-        self._running = False
+        self._running = False  # must be set before final flush so flush loop exits cleanly
+        # Let the flush loop drain any remaining queued items before re-enabling buttons
+        self._flush_queue()
         self._run_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
         self._export_btn.configure(state="normal")
