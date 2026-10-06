@@ -12,6 +12,11 @@ from app.core.profile_manager import ProfileManager
 from app.models.request_model import RequestProfile
 from app.config import METHOD_COLORS
 
+# Above this many requests, per-row CTk widgets (CTkFrame + CTkCheckBox +
+# labels) become slow/unstable to create (thousands of themed widgets in one
+# scrollable frame). Fall back to a single virtualized tk.Listbox instead.
+LARGE_IMPORT_THRESHOLD = 150
+
 
 class PostmanImportDialog(ctk.CTkToplevel):
     """
@@ -45,9 +50,21 @@ class PostmanImportDialog(ctk.CTkToplevel):
         self.imported_count     = 0
         self.target_collection  = result.collection_name
 
-        # Per-profile checkbox vars: index → BooleanVar
+        # Per-profile checkbox vars: index → BooleanVar (small collections only)
         self._check_vars: list[tuple[RequestProfile, ctk.BooleanVar]] = []
         self._warnings_expanded = False
+        self._large_mode = len(result.profiles) > LARGE_IMPORT_THRESHOLD
+        self._listbox: tk.Listbox | None = None
+
+        # Precompute which profile names are referenced by a warning, so
+        # per-row warning lookup is O(1) instead of scanning every warning
+        # for every profile.
+        self._warned_names: set[str] = set()
+        for w in result.warnings:
+            if w.startswith("'"):
+                end = w.find("'", 1)
+                if end != -1:
+                    self._warned_names.add(w[1:end])
 
         self._build()
 
@@ -188,6 +205,64 @@ class PostmanImportDialog(ctk.CTkToplevel):
     # ------------------------------------------------------------------
 
     def _populate_list(self) -> None:
+        if self._large_mode:
+            self._populate_list_large()
+        else:
+            self._populate_list_widgets()
+
+    def _populate_list_large(self) -> None:
+        """Lightweight path for big collections: one virtualized Listbox
+        instead of a per-row widget tree (avoids freezing/crashing on
+        collections with hundreds of requests)."""
+        r = self._result
+
+        note = ctk.CTkLabel(
+            self._list_scroll,
+            text=(
+                f"{len(r.profiles)} requests — showing a compact list for "
+                f"performance. All items are selected by default; "
+                f"Ctrl/Shift-click to adjust."
+            ),
+            font=("Segoe UI", 10), text_color="#64748b", anchor="w", wraplength=620,
+        )
+        note.pack(fill="x", padx=4, pady=(0, 4))
+
+        list_frame = tk.Frame(self._list_scroll, bg="#1a1a24")
+        list_frame.pack(fill="both", expand=True)
+
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical")
+        self._listbox = tk.Listbox(
+            list_frame,
+            selectmode=tk.EXTENDED,
+            activestyle="none",
+            bg="#1a1a24", fg="#e5e7eb",
+            selectbackground="#2563eb", selectforeground="#ffffff",
+            highlightthickness=0, borderwidth=0,
+            font=("Segoe UI", 10),
+            height=12,
+            yscrollcommand=scrollbar.set,
+        )
+        scrollbar.config(command=self._listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        self._listbox.pack(side="left", fill="both", expand=True)
+
+        for skip_name in r.skipped:
+            self._listbox.insert("end", f"❌  {skip_name}  (cannot be converted)")
+        skipped_count = len(r.skipped)
+
+        for profile in r.profiles:
+            icon = "⚠️" if self._profile_has_warning(profile) else "✅"
+            self._listbox.insert(
+                "end", f"{icon}  [{profile.method:<6}] {profile.name}"
+            )
+
+        for i in range(skipped_count):
+            self._listbox.itemconfig(i, fg="#64748b")
+
+        self._listbox.selection_set(skipped_count, "end")
+        self._listbox.bind("<<ListboxSelect>>", lambda _e: self._update_import_btn())
+
+    def _populate_list_widgets(self) -> None:
         r = self._result
 
         # Skipped items (grey, disabled)
@@ -241,9 +316,8 @@ class PostmanImportDialog(ctk.CTkToplevel):
 
     def _profile_has_warning(self, profile: RequestProfile) -> bool:
         """Check if any warning message references this profile name."""
-        return any(
-            f"'{profile.name}'" in w or profile.url and "{{" in profile.url
-            for w in self._result.warnings
+        return profile.name in self._warned_names or bool(
+            profile.url and "{{" in profile.url
         )
 
     # ------------------------------------------------------------------
@@ -278,11 +352,27 @@ class PostmanImportDialog(ctk.CTkToplevel):
     # ------------------------------------------------------------------
 
     def _select_all(self, value: bool) -> None:
-        for _, var in self._check_vars:
-            var.set(value)
+        if self._large_mode:
+            if self._listbox is not None:
+                if value:
+                    self._listbox.selection_set(len(self._result.skipped), "end")
+                else:
+                    self._listbox.selection_clear(0, "end")
+        else:
+            for _, var in self._check_vars:
+                var.set(value)
         self._update_import_btn()
 
     def _selected_profiles(self) -> list[RequestProfile]:
+        if self._large_mode:
+            if self._listbox is None:
+                return []
+            skipped_count = len(self._result.skipped)
+            return [
+                self._result.profiles[i - skipped_count]
+                for i in self._listbox.curselection()
+                if i >= skipped_count
+            ]
         return [p for p, var in self._check_vars if var.get()]
 
     def _import_btn_label(self) -> str:
