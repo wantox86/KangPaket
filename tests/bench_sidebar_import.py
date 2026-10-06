@@ -120,8 +120,115 @@ def bench_import(root) -> None:
 
         timed(f"full import flow (dialog+import+sidebar) {n} reqs", run)
         assert done and done[0][0] == n, f"import count mismatch: {done}"
+        # Folder structure must be preserved (default root = parsed collection name)
+        expected = {p.collection for p in result.profiles}
+        got = pm.get_collections()
+        assert set(got) == expected and len(got) == len(expected), (len(got), len(expected))
+        assert len(pm.load_all_profiles()) == n
+        assert len(sb._profile_btns) == n, len(sb._profile_btns)
+        print(f"  structure preserved: {len(got)} collections, {n} profiles, sidebar rows {len(sb._profile_btns)}")
         sb.destroy()
     finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class _Settings:
+    def get(self, key, default=None):
+        return {"default_timeout": 10.0, "proxy_enabled": False}.get(key, default)
+
+
+def bench_runner_checklist(root, n: int) -> None:
+    from app.ui.runner_window import RunnerWindow
+    pm, d = fresh_pm(synthetic(n, n))
+    try:
+        win = timed(f"runner window open (checklist {n} items)",
+                    lambda: (lambda w: (root.update(), w)[1])(RunnerWindow(root, pm, _Settings())))
+        assert len(win._checklist) == n
+        names = [p.name for p, _ in win._checklist]
+        assert names == sorted(names, key=str.lower), "checklist order changed"
+
+        def none_all():
+            win._select_all(False)
+            root.update()
+        timed(f"  select none ({n})", none_all)
+        assert not any(v.get() for _, v in win._checklist)
+        timed(f"  select all ({n})", lambda: (win._select_all(True), root.update()))
+        assert all(v.get() for _, v in win._checklist)
+        # click-toggle the first row through the real canvas handler
+        cl = win._checklist_scroll
+        cl._canvas.event_generate("<Motion>", x=40, y=5)
+        cl._canvas.event_generate("<ButtonRelease-1>", x=40, y=5)
+        root.update()
+        assert win._checklist[0][1].get() is False, "click did not toggle first row"
+        win.destroy()
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def bench_runner_run(root, n: int, deadline: float = 90.0) -> None:
+    """Real run against a local dummy HTTP server; checks counters/results."""
+    import http.server
+    import threading
+    from app.ui.runner_window import RunnerWindow
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    profiles = synthetic(n, n)
+    for p in profiles:
+        p.url = f"http://127.0.0.1:{port}/item/{p.name.split()[2]}"
+        p.method = "GET"
+    pm, d = fresh_pm(profiles)
+    try:
+        win = RunnerWindow(root, pm, _Settings())
+        root.update()
+        win._delay_var.set("0")
+
+        def run():
+            # The engine posts to the Tk loop from its worker thread, so drive a
+            # real mainloop (polling with update() is not enough).
+            t0 = time.monotonic()
+
+            def poll():
+                if not win._running and win._result_queue.empty() and win._runner_result is not None:
+                    root.quit()
+                elif time.monotonic() - t0 > deadline:
+                    root.quit()
+                else:
+                    root.after(20, poll)
+
+            win._start_run()
+            root.after(20, poll)
+            root.mainloop()
+            if win._runner_result is None:
+                raise SystemExit(f"runner did not finish within {deadline}s")
+            root.update()
+
+        timed(f"runner real run, {n} requests (localhost)", run)
+        assert win._count_done == n == win._count_total, (win._count_done, n)
+        assert win._count_passed == n, (win._count_passed, n)
+        assert win._prog_label.cget("text") == f"{n} / {n}"
+        assert win._passed_label.cget("text") == f"✅ {n}"
+        rendered = [r for r in win._result_rows if r is not None]
+        assert len(rendered) == min(n, win._MAX_RENDERED_ROWS), len(rendered)
+        assert win._runner_result is not None and len(win._runner_result.items) == n
+        print(f"  counters ok: {win._count_passed}/{n} passed, {len(rendered)} rows rendered "
+              f"(cap {win._MAX_RENDERED_ROWS}), export items {len(win._runner_result.items)}")
+        win.destroy()
+    finally:
+        srv.shutdown()
         shutil.rmtree(d, ignore_errors=True)
 
 
@@ -146,6 +253,10 @@ def main() -> int:
         ncol = len({p.collection for p in r.profiles})
         bench_sidebar(root, f"sample {len(r.profiles)} profiles/{ncol} collections (real)", r.profiles)
         bench_import(root)
+
+    for n in (50, 616, 2000):
+        bench_runner_checklist(root, n)
+    bench_runner_run(root, 150)
 
     root.destroy()
     worst = max(RESULTS, key=lambda x: x[1])

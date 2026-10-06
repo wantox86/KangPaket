@@ -19,6 +19,24 @@ from app.config import METHOD_COLORS
 LARGE_IMPORT_THRESHOLD = 15
 
 
+COLLECTION_SEP = " / "
+
+
+def rebase_collection(collection: str, parsed_root: str, target_root: str) -> str:
+    """Replace the leading Postman collection name (``parsed_root``) of a
+    parser-built collection label with ``target_root``, keeping the folder
+    sub-path. E.g. ('btpns / KOMODO / prs', 'btpns', 'X') -> 'X / KOMODO / prs'.
+    A request without sub-folder (== parsed_root) goes directly under the root.
+    Labels that don't start with ``parsed_root`` are returned unchanged.
+    """
+    if collection == parsed_root:
+        return target_root
+    prefix = parsed_root + COLLECTION_SEP
+    if collection.startswith(prefix):
+        return target_root + COLLECTION_SEP + collection[len(prefix):]
+    return collection
+
+
 class PostmanImportDialog(ctk.CTkToplevel):
     """
     Modal dialog shown after a Postman collection file is successfully parsed.
@@ -122,12 +140,19 @@ class PostmanImportDialog(ctk.CTkToplevel):
             font=("Segoe UI", 11),
         ).pack(side="left", padx=(0, 8))
 
-        ctk.CTkLabel(col_row, text="or type new:",
+        ctk.CTkLabel(col_row, text="or type new root:",
                      font=("Segoe UI", 10), text_color="#888").pack(side="left", padx=(0, 4))
         self._new_col_var = ctk.StringVar()
         ctk.CTkEntry(col_row, textvariable=self._new_col_var,
                      placeholder_text="New collection name",
                      height=26, font=("Segoe UI", 11), width=160).pack(side="left")
+
+        ctk.CTkLabel(
+            info_frame,
+            text="Folder structure is kept: the name above is the root; "
+                 "sub-folders stay as sub-collections (Root / Folder / …).",
+            font=("Segoe UI", 10), text_color="#64748b", anchor="w",
+        ).pack(fill="x", padx=16, pady=(0, 6))
 
         ctk.CTkFrame(self, height=1, fg_color="#333").pack(fill="x")
 
@@ -401,9 +426,11 @@ class PostmanImportDialog(ctk.CTkToplevel):
         if not target:
             target = self._result.collection_name
 
-        # Override collection on all selected profiles
+        # Target acts as the ROOT: each request keeps its own folder sub-path
+        # (only the Postman collection name, the first segment, is replaced).
+        parsed_root = self._result.collection_name
         for profile in selected:
-            profile.collection = target
+            profile.collection = rebase_collection(profile.collection, parsed_root, target)
             self._pm.save_profile(profile)
 
         self.imported_count    = len(selected)

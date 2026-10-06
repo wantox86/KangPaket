@@ -20,6 +20,7 @@ from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
 from app.models.runner_model import RunnerConfig, RunItemResult, RunnerResult
 from app.ui.widgets.runner_result_row import RunnerResultRow
+from app.ui.widgets.canvas_checklist import CanvasChecklist
 from app.config import METHOD_COLORS, RESULTS_DIR
 
 
@@ -60,11 +61,12 @@ class RunnerWindow(ctk.CTkToplevel):
         self._count_done    = 0
         self._count_total   = 0
 
-        # Max rows rendered as full widgets; beyond this only counters update.
-        # Kept small on purpose: each RunnerResultRow is ~8 CTk widgets and cost is
-        # super-linear on macOS/Tk 9 (measured 10 rows 0.3s, 25 rows 2.5s, 50 rows
-        # 17.6s, so the old cap of 500 effectively hangs). Full results stay in Export.
-        self._MAX_RENDERED_ROWS = 30
+        # Max result rows rendered; beyond this only counters update. Each row is
+        # a CTkFrame + one canvas (collapsed line drawn as canvas items). Cost is
+        # still super-linear on macOS/Tk 9: measured 50 rows 0.2s, 100 0.6s,
+        # 150 1.4s, 200 3.1s, 500 40s. (Old 8-CTk-label rows: 25 rows 2.5s,
+        # 50 rows 17.6s.) Full results stay available in Export.
+        self._MAX_RENDERED_ROWS = 100
 
         # Ordered checklist items: list of (profile, BooleanVar)
         self._checklist: list[tuple[RequestProfile, ctk.BooleanVar]] = []
@@ -189,9 +191,8 @@ class RunnerWindow(ctk.CTkToplevel):
         ).pack(side="left")
 
         # Scrollable checklist — fixed height so items below are always visible
-        self._checklist_scroll = ctk.CTkScrollableFrame(
-            parent, corner_radius=0, fg_color="transparent", height=110,
-        )
+        # (canvas-drawn: per-row CTk widgets hang with hundreds of requests)
+        self._checklist_scroll = CanvasChecklist(parent, height=110)
         self._checklist_scroll.pack(fill="x", padx=12, pady=(0, 4))
 
         self._populate_checklist(self._collection_var.get())
@@ -307,36 +308,24 @@ class RunnerWindow(ctk.CTkToplevel):
         self._populate_checklist(value)
 
     def _populate_checklist(self, collection: str) -> None:
-        for widget in self._checklist_scroll.winfo_children():
-            widget.destroy()
         self._checklist.clear()
 
         grouped = self._pm.get_profiles_by_collection()
         profiles = grouped.get(collection, [])
 
         if not profiles:
-            ctk.CTkLabel(
-                self._checklist_scroll,
-                text="No requests in this collection.",
-                font=("Segoe UI", 11), text_color="#888",
-            ).pack(pady=8)
+            self._checklist_scroll.set_message("No requests in this collection.")
             return
 
+        rows = []
         for profile in profiles:
             var = ctk.BooleanVar(value=True)
-            row = ctk.CTkFrame(self._checklist_scroll, fg_color="transparent")
-            row.pack(fill="x", pady=1)
-            ctk.CTkCheckBox(row, text="", variable=var, width=24,
-                            checkbox_width=16, checkbox_height=16).pack(side="left")
-            mc = METHOD_COLORS.get(profile.method, "#61affe")
-            ctk.CTkLabel(row, text=profile.method[:4], font=("Segoe UI", 9, "bold"),
-                         text_color=mc, width=34).pack(side="left")
-            ctk.CTkLabel(row, text=profile.name, font=("Segoe UI", 11),
-                         anchor="w").pack(side="left", fill="x", expand=True)
-            url_short = profile.url[:50] + ("…" if len(profile.url) > 50 else "")
-            ctk.CTkLabel(row, text=url_short, font=("Segoe UI", 9),
-                         text_color="#64748b", anchor="w").pack(side="left", padx=4)
             self._checklist.append((profile, var))
+            rows.append((
+                profile.method, profile.name, profile.url, var,
+                METHOD_COLORS.get(profile.method, "#61affe"),
+            ))
+        self._checklist_scroll.set_rows(rows)
 
     def _refresh_collections(self) -> None:
         cols = self._pm.get_collections() or ["Default"]
