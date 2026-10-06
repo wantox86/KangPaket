@@ -97,3 +97,6 @@ $RECYCLE.BIN/
 CLAUDE.md
 .claude
 __pycache__
+
+# ------ AI assistant instructions -------------------------------------------
+.github/copilot-instructions.md
