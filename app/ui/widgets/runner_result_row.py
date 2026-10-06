@@ -4,6 +4,9 @@ Two states: collapsed (default) and expanded (click to toggle).
 """
 from __future__ import annotations
 
+import tkinter as tk
+import tkinter.font as tkfont
+
 import customtkinter as ctk
 
 from app.config import METHOD_COLORS, status_color
@@ -12,6 +15,43 @@ from app.models.runner_model import RunItemResult
 _STATUS_ICON  = {"success": "✅", "failed": "❌", "error": "⚠️",  "skipped": "⏭"}
 _STATUS_COLOR = {"success": "#49cc90", "failed": "#f93e3e", "error": "#fca130", "skipped": "#64748b"}
 _ROW_BG       = {"success": "#0d1f15", "failed": "#1f0d0d", "error": "#1f180d", "skipped": "#111118"}
+
+
+_FONTS: dict = {}
+
+
+def _font(widget, spec: tuple) -> tkfont.Font:
+    f = _FONTS.get(spec)
+    if f is None:
+        f = _FONTS[spec] = tkfont.Font(widget, family=spec[0], size=spec[1])
+    return f
+
+
+def _fit(text: str, font: tkfont.Font, max_w: int) -> str:
+    if font.measure(text) <= max_w:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if font.measure(text[:mid] + "…") <= max_w:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + "…"
+
+
+class _ArrowItem:
+    """Expand/collapse arrow drawn on the row canvas; mimics CTkLabel.configure(text=...)."""
+
+    def __init__(self, canvas: tk.Canvas) -> None:
+        self._c = canvas
+        self._id = canvas.create_text(0, 15, text="▶", anchor="e", font=("Segoe UI", 10), fill="#64748b")
+
+    def place(self, width: int) -> None:
+        self._c.coords(self._id, width - 8, 15)
+
+    def configure(self, text: str) -> None:
+        self._c.itemconfigure(self._id, text=text)
 
 
 class RunnerResultRow(ctk.CTkFrame):
@@ -47,75 +87,37 @@ class RunnerResultRow(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _build_collapsed(self) -> None:
-        self._collapsed_frame = ctk.CTkFrame(
-            self, corner_radius=0, fg_color="transparent"
-        )
-        self._collapsed_frame.pack(fill="x", padx=6, pady=4)
-
+        # The collapsed line is ONE tk.Canvas with text items (not ~8 CTk labels):
+        # many CTk widgets per row are super-linear on macOS/Tk 9.
         item = self._item
-        status_color_val = _STATUS_COLOR.get(item.status, "#888")
+        bg = _ROW_BG.get(item.status, "#111118")
+        c = tk.Canvas(self, height=30, highlightthickness=0, bd=0, bg=bg)
+        c.pack(fill="x", padx=6, pady=4)
+        self._collapsed_frame = c
 
-        # Status icon
-        ctk.CTkLabel(
-            self._collapsed_frame,
-            text=_STATUS_ICON.get(item.status, "?"),
-            font=("Segoe UI", 13),
-            width=28,
-        ).pack(side="left")
-
-        # Index
-        ctk.CTkLabel(
-            self._collapsed_frame,
-            text=f"#{self._index}",
-            font=("Segoe UI", 11),
-            text_color="#64748b",
-            width=32,
-        ).pack(side="left")
-
-        # Method badge
+        f_name = _font(self, ("Segoe UI", 12))
+        x = 4
+        c.create_text(x + 14, 15, text=_STATUS_ICON.get(item.status, "?"), font=("Segoe UI", 13))
+        x += 28
+        c.create_text(x + 16, 15, text=f"#{self._index}", font=("Segoe UI", 11), fill="#64748b")
+        x += 32
         method = getattr(item, "_method", "")
         if method:
-            mc = METHOD_COLORS.get(method, "#61affe")
-            ctk.CTkLabel(
-                self._collapsed_frame,
-                text=method[:4],
-                font=("Segoe UI", 9, "bold"),
-                text_color=mc,
-                width=36,
-            ).pack(side="left", padx=(2, 4))
+            c.create_text(x + 20, 15, text=method[:4], font=("Segoe UI", 9, "bold"),
+                          fill=METHOD_COLORS.get(method, "#61affe"))
+            x += 36 + 6
+        c.create_text(x, 15, text=_fit(item.profile_name, f_name, 180), anchor="w",
+                      font=("Segoe UI", 12), fill="#dce4ee")
+        x += 180 + 8
 
-        # Profile name
-        ctk.CTkLabel(
-            self._collapsed_frame,
-            text=item.profile_name,
-            font=("Segoe UI", 12),
-            anchor="w",
-            width=180,
-        ).pack(side="left", padx=(0, 8))
-
-        # Status code
         if item.status_code is not None:
-            sc_color = status_color(item.status_code)
-            ctk.CTkLabel(
-                self._collapsed_frame,
-                text=str(item.status_code),
-                font=("Segoe UI", 12, "bold"),
-                text_color=sc_color,
-                width=48,
-            ).pack(side="left")
-
-        # Elapsed
+            c.create_text(x + 24, 15, text=str(item.status_code), font=("Segoe UI", 12, "bold"),
+                          fill=status_color(item.status_code))
+            x += 48
         if item.elapsed_ms is not None:
             elapsed = f"{item.elapsed_ms:.0f}ms" if item.elapsed_ms < 1000 else f"{item.elapsed_ms/1000:.2f}s"
-            ctk.CTkLabel(
-                self._collapsed_frame,
-                text=elapsed,
-                font=("Segoe UI", 11),
-                text_color="#64748b",
-                width=60,
-            ).pack(side="left")
-
-        # Size
+            c.create_text(x + 30, 15, text=elapsed, font=("Segoe UI", 11), fill="#64748b")
+            x += 60
         if item.size_bytes is not None:
             if item.size_bytes < 1024:
                 size_str = f"{item.size_bytes}B"
@@ -123,49 +125,22 @@ class RunnerResultRow(ctk.CTkFrame):
                 size_str = f"{item.size_bytes/1024:.1f}KB"
             else:
                 size_str = f"{item.size_bytes/(1024*1024):.1f}MB"
-            ctk.CTkLabel(
-                self._collapsed_frame,
-                text=size_str,
-                font=("Segoe UI", 11),
-                text_color="#64748b",
-                width=56,
-            ).pack(side="left")
+            c.create_text(x + 28, 15, text=size_str, font=("Segoe UI", 11), fill="#64748b")
+            x += 56
 
-        # Short failure message (right side)
         if item.status == "error" and item.error:
             short = item.error[:60] + ("…" if len(item.error) > 60 else "")
-            ctk.CTkLabel(
-                self._collapsed_frame,
-                text=short,
-                font=("Segoe UI", 10),
-                text_color="#fca130",
-                anchor="w",
-            ).pack(side="left", padx=8, fill="x", expand=True)
+            c.create_text(x + 8, 15, text=short, anchor="w", font=("Segoe UI", 10), fill="#fca130")
         elif item.assertion_results:
             failed_a = [a for a in item.assertion_results if not a["passed"]]
             if failed_a:
-                ctk.CTkLabel(
-                    self._collapsed_frame,
-                    text=f"assertion: {failed_a[0]['name']} FAILED",
-                    font=("Segoe UI", 10),
-                    text_color="#f93e3e",
-                    anchor="w",
-                ).pack(side="left", padx=8, fill="x", expand=True)
+                c.create_text(x + 8, 15, text=f"assertion: {failed_a[0]['name']} FAILED",
+                              anchor="w", font=("Segoe UI", 10), fill="#f93e3e")
 
-        # Expand indicator
-        self._expand_arrow = ctk.CTkLabel(
-            self._collapsed_frame,
-            text="▶",
-            font=("Segoe UI", 10),
-            text_color="#64748b",
-            width=16,
-        )
-        self._expand_arrow.pack(side="right", padx=4)
-
-        # Bind click to toggle
-        for widget in self._collapsed_frame.winfo_children():
-            widget.bind("<Button-1>", self._on_click)
-        self._collapsed_frame.bind("<Button-1>", self._on_click)
+        # Expand indicator (right edge; the message text above is clipped by it)
+        self._expand_arrow = _ArrowItem(c)
+        c.bind("<Configure>", lambda e: self._expand_arrow.place(e.width))
+        c.bind("<Button-1>", self._on_click)
         self.bind("<Button-1>", self._on_click)
 
     # ------------------------------------------------------------------

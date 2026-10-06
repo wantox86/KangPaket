@@ -1,5 +1,6 @@
 """
-KangPaket — Request panel with full tabs: Params, Headers, Body, Auth, Settings.
+KangPaket — Request panel with full tabs: Params, Headers, Body, Auth,
+Assertions, Settings.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from app.core.http_client import HttpClient
 from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
 from app.models.response_model import ResponseResult
+from app.ui.widgets.assertion_editor import AssertionEditor
 from app.ui.widgets.key_value_editor import KeyValueEditor
 
 
@@ -126,13 +128,14 @@ class RequestPanel(ctk.CTkFrame):
         self._tabview = ctk.CTkTabview(self, anchor="nw")
         self._tabview.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-        for tab_name in ["Params", "Headers", "Body", "Auth", "Settings"]:
+        for tab_name in ["Params", "Headers", "Body", "Auth", "Assertions", "Settings"]:
             self._tabview.add(tab_name)
 
         self._build_params_tab()
         self._build_headers_tab()
         self._build_body_tab()
         self._build_auth_tab()
+        self._build_assertions_tab()
         self._build_settings_tab()
 
     # ---- Params ----
@@ -433,6 +436,15 @@ class RequestPanel(ctk.CTkFrame):
 
     # ---- Settings (per-request override) ----
 
+    # ---- Assertions ----
+
+    def _build_assertions_tab(self) -> None:
+        tab = self._tabview.tab("Assertions")
+        self._assertions_editor = AssertionEditor(tab, on_change=self._mark_dirty)
+        self._assertions_editor.pack(fill="both", expand=True)
+
+    # ---- Settings ----
+
     def _build_settings_tab(self) -> None:
         tab = self._tabview.tab("Settings")
         pad = {"padx": 8, "pady": 4}
@@ -506,6 +518,9 @@ class RequestPanel(ctk.CTkFrame):
             self._apikey_value_var.set(profile.auth_data.get("value", ""))
             self._apikey_in_var.set(profile.auth_data.get("in", "header"))
 
+        # Assertions
+        self._assertions_editor.set_data(profile.assertions)
+
         # Settings
         self._timeout_var.set(str(profile.timeout) if profile.timeout is not None else "")
         self._follow_redirects_var.set(profile.follow_redirects)
@@ -560,6 +575,7 @@ class RequestPanel(ctk.CTkFrame):
             body_form=body_form,
             auth_type=auth_type,
             auth_data=auth_data,
+            assertions=self._assertions_editor.get_data(),
             timeout=timeout,
             follow_redirects=self._follow_redirects_var.get(),
             verify_ssl=self._verify_ssl_var.get(),

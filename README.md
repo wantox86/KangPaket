@@ -5,10 +5,10 @@
 ## Features
 
 - All HTTP methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
-- Request tabs: Params, Headers, Body (raw / form-data / urlencoded), Auth (Bearer / Basic / API Key), Settings
+- Request tabs: Params, Headers, Body (raw / form-data / urlencoded), Auth (Bearer / Basic / API Key), Assertions, Settings
 - Response viewer: JSON syntax highlighting, Headers, Cookies, and Info tabs
 - Save and manage request profiles organized by collection
-- Collection Runner: sequential / parallel execution with assertions and CSV variable support
+- Collection Runner: sequential / parallel execution with per-request assertions and CSV variable support
 - Import from Postman Collection v2.0 & v2.1
 - Export / import profiles across machines
 - Dark / light theme, configurable font size, proxy support

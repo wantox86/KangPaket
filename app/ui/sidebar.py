@@ -4,7 +4,9 @@ search/filter, context menu (rename, duplicate, delete, move collection).
 """
 from __future__ import annotations
 
+import sys
 import tkinter as tk
+import tkinter.font as tkfont
 import customtkinter as ctk
 
 from app.config import METHOD_COLORS, SIDEBAR_WIDTH
@@ -12,7 +14,31 @@ from app.core.profile_manager import ProfileManager
 from app.models.request_model import RequestProfile
 
 
+# Layout constants for the canvas-drawn list (pixels)
+_ROW_H = 28          # profile row height
+_ROW_GAP = 1         # gap between profile rows
+_HDR_H = 32          # collection header height
+_HDR_GAP = 4         # gap above a collection header
+_PAD_X = 4
+
+_C_HDR_BG    = "#1e1e2e"
+_C_HDR_TEXT  = "#94a3b8"
+_C_HDR_HOVER = "#2a2a3e"
+_C_ROW_TEXT  = "#e2e8f0"
+_C_ROW_HOVER = "#2a3a5a"
+_C_SELECTED  = "#2563eb"
+_C_SELECTED_CLICK = "#1e3a5f"
+
+
 class Sidebar(ctk.CTkFrame):
+    """Daftar profil.
+
+    List digambar langsung di satu ``tk.Canvas`` (item canvas, bukan widget
+    per baris). Pada macOS/Tk 9 biaya map/layout ratusan widget CTk
+    (apalagi di dalam CTkScrollableFrame) tumbuh super-linear: 100 baris
+    ~50 detik, 600 baris hang. Canvas item tidak punya biaya itu.
+    """
+
     def __init__(
         self,
         parent,
@@ -40,8 +66,14 @@ class Sidebar(ctk.CTkFrame):
         self._collapsed: dict[str, bool] = {}
         # Track currently selected profile id
         self._selected_id: str | None = None
-        # Track all rendered profile buttons: id → CTkButton
-        self._profile_btns: dict[str, ctk.CTkButton] = {}
+        # Track all rendered profile rows: id → canvas rect item id
+        self._profile_btns: dict[str, int] = {}
+        self._row_normal: dict[str, str] = {}      # id → warna normal row (untuk hover restore)
+        self._hits: dict[int, dict] = {}           # canvas item id → hit record
+        self._hover_rec: dict | None = None
+        self._grouped: dict[str, list[RequestProfile]] = {}
+        self._drawn_width = 0
+        self._redraw_job: str | None = None
 
         self._build_header()
         self._build_search()
@@ -86,10 +118,53 @@ class Sidebar(ctk.CTkFrame):
         ).pack(fill="x")
 
     def _build_list_area(self) -> None:
-        self._scroll = ctk.CTkScrollableFrame(
-            self, corner_radius=0, fg_color="transparent"
+        self._f_hdr  = tkfont.Font(self, family="Segoe UI", size=11, weight="bold")
+        self._f_row  = tkfont.Font(self, family="Segoe UI", size=11)
+        self._f_badge = tkfont.Font(self, family="Segoe UI", size=9, weight="bold")
+        self._f_btn  = tkfont.Font(self, family="Segoe UI", size=10)
+        self._f_empty = tkfont.Font(self, family="Segoe UI", size=11)
+
+        self._scrollbar = ctk.CTkScrollbar(self, orientation="vertical", command=self._canvas_yview)
+        self._scrollbar.pack(side="right", fill="y")
+        self._canvas = tk.Canvas(
+            self, highlightthickness=0, bd=0, bg=self._canvas_bg(),
+            yscrollcommand=self._scrollbar.set, yscrollincrement=_ROW_H // 2,
         )
-        self._scroll.pack(fill="both", expand=True)
+        self._canvas.pack(side="left", fill="both", expand=True)
+
+        c = self._canvas
+        c.bind("<Configure>", self._on_canvas_configure)
+        c.bind("<Motion>", self._on_motion)
+        c.bind("<Leave>", lambda e: self._set_hover(None))
+        c.bind("<ButtonRelease-1>", self._on_left_click)
+        c.bind("<Button-2>" if self._is_mac() else "<Button-3>", self._on_right_click)
+        if "linux" in sys.platform:
+            c.bind("<Button-4>", lambda e: self._wheel(-3))
+            c.bind("<Button-5>", lambda e: self._wheel(3))
+        elif self._is_mac():
+            c.bind("<MouseWheel>", lambda e: self._wheel(-e.delta))
+        else:
+            c.bind("<MouseWheel>", lambda e: self._wheel(-3 * (e.delta // 120 or (1 if e.delta > 0 else -1))))
+
+    def _canvas_bg(self) -> str:
+        return self._apply_appearance_mode(self.cget("fg_color"))
+
+    def _set_appearance_mode(self, mode_string):
+        super()._set_appearance_mode(mode_string)
+        if hasattr(self, "_canvas"):
+            self._canvas.configure(bg=self._canvas_bg())
+            self._redraw()
+
+    def _canvas_yview(self, *args) -> None:
+        if self._content_h() > self._canvas.winfo_height():
+            self._canvas.yview(*args)
+
+    def _wheel(self, units: int) -> None:
+        if self._content_h() > self._canvas.winfo_height():
+            self._canvas.yview_scroll(int(units), "units")
+
+    def _content_h(self) -> int:
+        return getattr(self, "_total_h", 0)
 
     # ------------------------------------------------------------------
     # Public API
@@ -97,25 +172,26 @@ class Sidebar(ctk.CTkFrame):
 
     def refresh(self, keep_selection: bool = True) -> None:
         """Reload semua profil dari disk dan re-render daftar."""
-        self._profile_btns.clear()
-        for widget in self._scroll.winfo_children():
-            widget.destroy()
+        self._grouped = self._pm.get_profiles_by_collection()
+        self._redraw()
 
-        query   = self._search_var.get().strip().lower() if hasattr(self, "_search_var") else ""
-        grouped = self._pm.get_profiles_by_collection()
+    def select_profile(self, profile_id: str) -> None:
+        """Highlight a profile row as selected."""
+        self._selected_id = profile_id
+        for pid in self._profile_btns:
+            self._set_row_color(pid, _C_SELECTED if pid == profile_id else self._canvas_bg())
 
-        if not grouped:
-            ctk.CTkLabel(
-                self._scroll,
-                text="No profiles yet.\nClick + to start.",
-                font=("Segoe UI", 11),
-                text_color="#888",
-                justify="center",
-            ).pack(pady=24)
-            return
+    def get_collections(self) -> list[str]:
+        return self._pm.get_collections()
 
-        for collection, profiles in grouped.items():
-            # Apply search filter
+    # ------------------------------------------------------------------
+    # Render helpers
+    # ------------------------------------------------------------------
+
+    def _visible_groups(self) -> list[tuple[str, list[RequestProfile]]]:
+        query = self._search_var.get().strip().lower() if hasattr(self, "_search_var") else ""
+        out = []
+        for collection, profiles in self._grouped.items():
             filtered = [
                 p for p in profiles
                 if not query
@@ -125,130 +201,206 @@ class Sidebar(ctk.CTkFrame):
             ]
             if query and not filtered:
                 continue
-            self._render_collection(collection, filtered)
+            out.append((collection, filtered))
+        return out
 
-    def select_profile(self, profile_id: str) -> None:
-        """Highlight a profile row as selected."""
-        self._selected_id = profile_id
-        for pid, btn in self._profile_btns.items():
-            if pid == profile_id:
-                btn.configure(fg_color="#2563eb")
+    def _fit(self, text: str, font: tkfont.Font, max_w: int) -> str:
+        if max_w <= 0:
+            return ""
+        if font.measure(text) <= max_w:
+            return text
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if font.measure(text[:mid] + "…") <= max_w:
+                lo = mid
             else:
-                btn.configure(fg_color="transparent")
+                hi = mid - 1
+        return text[:lo] + "…"
 
-    def get_collections(self) -> list[str]:
-        return self._pm.get_collections()
+    def _redraw(self) -> None:
+        """Gambar ulang seluruh list dari cache ``self._grouped`` (tanpa baca disk)."""
+        if self._redraw_job is not None:
+            try:
+                self.after_cancel(self._redraw_job)
+            except Exception:
+                pass
+            self._redraw_job = None
 
-    # ------------------------------------------------------------------
-    # Render helpers
-    # ------------------------------------------------------------------
+        c = self._canvas
+        top = c.yview()[0]
+        c.delete("all")
+        self._profile_btns.clear()
+        self._row_normal.clear()
+        self._hits.clear()
+        self._hover_rec = None
 
-    def _render_collection(
-        self, collection: str, profiles: list[RequestProfile]
-    ) -> None:
-        is_collapsed = self._collapsed.get(collection, False)
+        w = c.winfo_width()
+        if w <= 1:
+            w = SIDEBAR_WIDTH - 16
+        self._drawn_width = w
+        bg = self._canvas_bg()
 
-        # Collection header row
-        hdr = ctk.CTkFrame(self._scroll, corner_radius=4, fg_color="#1e1e2e")
-        hdr.pack(fill="x", padx=4, pady=(4, 0))
-
-        arrow = "▶" if is_collapsed else "▼"
-        col_btn = ctk.CTkButton(
-            hdr,
-            text=f"{arrow}  {collection}  ({len(profiles)})",
-            anchor="w",
-            font=("Segoe UI", 11, "bold"),
-            fg_color="transparent",
-            hover_color="#2a2a3e",
-            text_color="#94a3b8",
-            height=28,
-            command=lambda c=collection: self._toggle_collection(c),
-        )
-        col_btn.pack(side="left", fill="x", expand=True, padx=2)
-
-        # Delete collection button (×)
-        ctk.CTkButton(
-            hdr,
-            text="×",
-            width=24, height=24,
-            font=("Segoe UI", 13, "bold"),
-            fg_color="transparent",
-            hover_color="#7f1d1d",
-            text_color="#f87171",
-            command=lambda c=collection: self._delete_collection(c),
-        ).pack(side="right", padx=(0, 2))
-
-        # Run collection button (▶)
-        ctk.CTkButton(
-            hdr,
-            text="▶",
-            width=24, height=24,
-            font=("Segoe UI", 10),
-            fg_color="transparent",
-            hover_color="#16a34a",
-            text_color="#49cc90",
-            command=lambda c=collection: self._run_collection(c),
-        ).pack(side="right", padx=2)
-
-        # Right-click context menu on collection header
-        for widget in (hdr, col_btn):
-            widget.bind(
-                "<Button-2>" if self._is_mac() else "<Button-3>",
-                lambda event, c=collection, n=len(profiles): self._show_collection_menu(event, c, n),
+        groups = self._visible_groups()
+        if not self._grouped:
+            c.create_text(
+                w // 2, 40, text="No profiles yet.\nClick + to start.",
+                font=self._f_empty, fill="#888", justify="center",
             )
-
-        if is_collapsed:
+            self._total_h = 0
+            c.configure(scrollregion=(0, 0, w, 0))
             return
 
-        # Profile rows
-        items_frame = ctk.CTkFrame(self._scroll, corner_radius=0, fg_color="transparent")
-        items_frame.pack(fill="x", padx=4, pady=(0, 4))
+        y = 0
+        for collection, profiles in groups:
+            y = self._draw_collection(y, w, collection, profiles, bg)
+        self._total_h = y + 4
+        c.configure(scrollregion=(0, 0, w, max(self._total_h, c.winfo_height())))
+        c.yview_moveto(top)
 
-        for profile in profiles:
-            self._render_profile_row(items_frame, profile)
+    def _reg_hit(self, rec: dict, *item_ids: int) -> None:
+        for i in item_ids:
+            self._hits[i] = rec
 
-    def _render_profile_row(
-        self, parent: ctk.CTkFrame, profile: RequestProfile
-    ) -> None:
-        is_selected = profile.id == self._selected_id
-        row_color   = "#2563eb" if is_selected else "transparent"
+    def _draw_collection(
+        self, y: int, w: int, collection: str, profiles: list[RequestProfile], bg: str
+    ) -> int:
+        c = self._canvas
+        is_collapsed = self._collapsed.get(collection, False)
 
-        row = ctk.CTkFrame(parent, corner_radius=4, fg_color=row_color)
-        row.pack(fill="x", pady=1)
-
-        # Method badge (small colored label)
-        method_color = METHOD_COLORS.get(profile.method, "#61affe")
-        badge = ctk.CTkLabel(
-            row,
-            text=profile.method[:3],  # "GET", "POS", "PUT"…
-            font=("Segoe UI", 9, "bold"),
-            text_color=method_color,
-            width=28,
-            anchor="center",
+        y += _HDR_GAP
+        x0, x1 = _PAD_X, w - _PAD_X
+        hdr_rect = c.create_rectangle(x0, y, x1, y + _HDR_H, fill=_C_HDR_BG, outline="")
+        arrow = "▶" if is_collapsed else "▼"
+        label = f"{arrow}  {collection}  ({len(profiles)})"
+        text_x = x0 + 8
+        text_w = (x1 - 62) - text_x
+        hdr_text = c.create_text(
+            text_x, y + _HDR_H // 2, text=self._fit(label, self._f_hdr, text_w),
+            anchor="w", font=self._f_hdr, fill=_C_HDR_TEXT,
         )
-        badge.pack(side="left", padx=(4, 0), pady=4)
-
-        # Profile name button
-        btn = ctk.CTkButton(
-            row,
-            text=profile.name,
-            anchor="w",
-            font=("Segoe UI", 11),
-            fg_color="transparent",
-            hover_color="#2a3a5a",
-            text_color="#e2e8f0",
-            height=28,
-            command=lambda p=profile: self._on_profile_click(p),
+        self._reg_hit(
+            {"kind": "toggle", "collection": collection, "count": len(profiles),
+             "rect": hdr_rect, "normal": _C_HDR_BG, "hover": _C_HDR_HOVER},
+            hdr_rect, hdr_text,
         )
-        btn.pack(side="left", fill="x", expand=True)
-        self._profile_btns[profile.id] = row  # track the row frame for highlight
 
-        # Right-click context menu
-        for widget in (row, badge, btn):
-            widget.bind(
-                "<Button-2>" if self._is_mac() else "<Button-3>",
-                lambda event, p=profile: self._show_context_menu(event, p),
+        # Small buttons on the right: ▶ run, × delete
+        by0, by1 = y + 4, y + _HDR_H - 4
+        for kind, glyph, color, hover, bx1 in (
+            ("delete", "×", "#f87171", "#7f1d1d", x1 - 4),
+            ("run",    "▶", "#49cc90", "#16a34a", x1 - 4 - 26),
+        ):
+            r = c.create_rectangle(bx1 - 24, by0, bx1, by1, fill=_C_HDR_BG, outline="")
+            t = c.create_text(
+                bx1 - 12, (by0 + by1) // 2, text=glyph, fill=color,
+                font=self._f_btn if kind == "run" else self._f_hdr,
             )
+            self._reg_hit(
+                {"kind": kind, "collection": collection, "count": len(profiles),
+                 "rect": r, "normal": _C_HDR_BG, "hover": hover},
+                r, t,
+            )
+        # Right-click on header body/buttons -> collection menu (handled via record)
+
+        y += _HDR_H
+        if is_collapsed:
+            return y
+
+        y += 0
+        for profile in profiles:
+            y = self._draw_profile_row(y, w, profile, bg)
+        return y + 4
+
+    def _draw_profile_row(self, y: int, w: int, profile: RequestProfile, bg: str) -> int:
+        c = self._canvas
+        y += _ROW_GAP
+        x0, x1 = _PAD_X, w - _PAD_X
+        color = _C_SELECTED if profile.id == self._selected_id else bg
+        rect = c.create_rectangle(x0, y, x1, y + _ROW_H, fill=color, outline="")
+        mid = y + _ROW_H // 2
+        badge = c.create_text(
+            x0 + 18, mid, text=profile.method[:3], font=self._f_badge,
+            fill=METHOD_COLORS.get(profile.method, "#61affe"),
+        )
+        name_x = x0 + 40
+        name = c.create_text(
+            name_x, mid, text=self._fit(profile.name, self._f_row, x1 - 6 - name_x),
+            anchor="w", font=self._f_row, fill=_C_ROW_TEXT,
+        )
+        self._profile_btns[profile.id] = rect
+        self._row_normal[profile.id] = color
+        self._reg_hit(
+            {"kind": "profile", "profile": profile, "rect": rect, "hover": _C_ROW_HOVER},
+            rect, badge, name,
+        )
+        return y + _ROW_H
+
+    def _set_row_color(self, pid: str, color: str) -> None:
+        self._row_normal[pid] = color
+        rect = self._profile_btns.get(pid)
+        if rect is not None:
+            self._canvas.itemconfigure(rect, fill=color)
+
+    # ------------------------------------------------------------------
+    # Canvas events (satu set binding untuk semua baris — tidak ada binding per item)
+    # ------------------------------------------------------------------
+
+    def _hit_at(self, event: tk.Event) -> dict | None:
+        c = self._canvas
+        x, y = c.canvasx(event.x), c.canvasy(event.y)
+        for item in reversed(c.find_overlapping(x, y, x, y)):
+            rec = self._hits.get(item)
+            if rec is not None:
+                return rec
+        return None
+
+    def _rec_normal(self, rec: dict) -> str:
+        if rec["kind"] == "profile":
+            return self._row_normal.get(rec["profile"].id, self._canvas_bg())
+        return rec["normal"]
+
+    def _set_hover(self, rec: dict | None) -> None:
+        old = self._hover_rec
+        if old is rec:
+            return
+        c = self._canvas
+        if old is not None:
+            c.itemconfigure(old["rect"], fill=self._rec_normal(old))
+        if rec is not None:
+            c.itemconfigure(rec["rect"], fill=rec["hover"])
+        c.configure(cursor="hand2" if rec is not None else "")
+        self._hover_rec = rec
+
+    def _on_motion(self, event: tk.Event) -> None:
+        self._set_hover(self._hit_at(event))
+
+    def _on_left_click(self, event: tk.Event) -> None:
+        rec = self._hit_at(event)
+        if rec is None:
+            return
+        kind = rec["kind"]
+        if kind == "profile":
+            self._on_profile_click(rec["profile"])
+        elif kind == "toggle":
+            self._toggle_collection(rec["collection"])
+        elif kind == "run":
+            self._run_collection(rec["collection"])
+        elif kind == "delete":
+            self._delete_collection(rec["collection"])
+
+    def _on_right_click(self, event: tk.Event) -> None:
+        rec = self._hit_at(event)
+        if rec is None:
+            return
+        if rec["kind"] == "profile":
+            self._show_context_menu(event, rec["profile"])
+        else:
+            self._show_collection_menu(event, rec["collection"], rec["count"])
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        if event.width != self._drawn_width and self._redraw_job is None:
+            self._redraw_job = self.after(30, self._redraw)
 
     # ------------------------------------------------------------------
     # Context menu
@@ -294,13 +446,13 @@ class Sidebar(ctk.CTkFrame):
             self._on_select(profile)
 
     def _on_search_change(self) -> None:
-        self.refresh(keep_selection=True)
+        self._redraw()
         if self._selected_id:
             self._highlight_selected()
 
     def _toggle_collection(self, collection: str) -> None:
         self._collapsed[collection] = not self._collapsed.get(collection, False)
-        self.refresh(keep_selection=True)
+        self._redraw()
 
     def _rename_profile(self, profile: RequestProfile) -> None:
         from app.ui.profile_dialog import ProfileDialog
@@ -401,11 +553,9 @@ class Sidebar(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _highlight_selected(self) -> None:
-        for pid, row_frame in self._profile_btns.items():
-            if pid == self._selected_id:
-                row_frame.configure(fg_color="#1e3a5f")
-            else:
-                row_frame.configure(fg_color="transparent")
+        bg = self._canvas_bg()
+        for pid in self._profile_btns:
+            self._set_row_color(pid, _C_SELECTED_CLICK if pid == self._selected_id else bg)
 
     # ------------------------------------------------------------------
     # Utils
