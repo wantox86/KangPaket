@@ -27,6 +27,15 @@ class RequestProfile:
     body_form: dict[str, str] = field(default_factory=dict)
     auth_type: str = "none"           # none | basic | bearer | api-key
     auth_data: dict[str, str] = field(default_factory=dict)
+    assertions: list[dict] = field(default_factory=list)
+    # Each assertion: {"type": str, ...params}. Supported types:
+    #   status_code_equals      -> {"value": int}
+    #   status_code_in          -> {"values": list[int]}
+    #   response_time_less_than -> {"value": int}          (ms)
+    #   body_contains           -> {"value": str}
+    #   body_json_path_equals   -> {"path": str, "value": Any}
+    #   header_exists           -> {"value": str}          (header name)
+    #   header_equals           -> {"header": str, "value": str}
     timeout: float | None = None      # None = use global default
     follow_redirects: bool = True
     verify_ssl: bool = True
@@ -48,6 +57,7 @@ class RequestProfile:
             "body_form": self.body_form,
             "auth_type": self.auth_type,
             "auth_data": self.auth_data,
+            "assertions": self.assertions,
             "timeout": self.timeout,
             "follow_redirects": self.follow_redirects,
             "verify_ssl": self.verify_ssl,
@@ -70,6 +80,7 @@ class RequestProfile:
             body_form=data.get("body_form", {}),
             auth_type=data.get("auth_type", "none"),
             auth_data=data.get("auth_data", {}),
+            assertions=data.get("assertions", []),
             timeout=data.get("timeout"),
             follow_redirects=data.get("follow_redirects", True),
             verify_ssl=data.get("verify_ssl", True),

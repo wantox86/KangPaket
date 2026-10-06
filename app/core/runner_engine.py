@@ -356,10 +356,9 @@ class RunnerEngine:
             proxy_https=proxy_https,
         )
 
-        # Evaluate assertions (stored on profile as metadata — Sprint 7 uses
-        # assertions passed via RunnerConfig; here we support profile-level ones)
-        assertions_cfg = getattr(profile, "_assertions", [])
-        assertion_results = _eval_assertions(assertions_cfg, response)
+        # Evaluate profile-level assertions (defined in the request panel's
+        # Assertions tab and persisted on RequestProfile.assertions).
+        assertion_results = _eval_assertions(profile.assertions, response)
 
         has_assertion_fail = any(not a["passed"] for a in assertion_results)
 
@@ -406,6 +405,13 @@ class RunnerEngine:
         p.body_content = sub(p.body_content, variables)
         p.body_form    = {k: sub(v, variables) for k, v in p.body_form.items()}
         p.auth_data    = {k: sub(str(v), variables) for k, v in p.auth_data.items()}
+        p.assertions   = [
+            {
+                k: sub(v, variables) if isinstance(v, str) else v
+                for k, v in a.items()
+            }
+            for a in p.assertions
+        ]
         return p
 
     # ------------------------------------------------------------------
