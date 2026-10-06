@@ -3,7 +3,7 @@ KangPaket — App-wide constants and configuration.
 """
 
 APP_NAME = "KangPaket"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_TITLE = "KangPaket"
 USER_AGENT = "KangPaket/1.0"
 
@@ -35,6 +35,27 @@ BODY_TYPES: list[str] = ["none", "raw", "form-data", "x-www-form-urlencoded"]
 
 # Auth types
 AUTH_TYPES: list[str] = ["none", "bearer", "basic", "api-key"]
+
+# Runner assertion types (evaluated by app/core/runner_engine.py)
+ASSERTION_TYPES: list[str] = [
+    "status_code_equals",
+    "status_code_in",
+    "response_time_less_than",
+    "body_contains",
+    "body_json_path_equals",
+    "header_exists",
+    "header_equals",
+]
+
+ASSERTION_LABELS: dict[str, str] = {
+    "status_code_equals":      "Status code equals",
+    "status_code_in":          "Status code in",
+    "response_time_less_than": "Response time < (ms)",
+    "body_contains":           "Body contains",
+    "body_json_path_equals":   "Body JSON path equals",
+    "header_exists":           "Header exists",
+    "header_equals":           "Header equals",
+}
 
 # Raw body content types
 RAW_CONTENT_TYPES: list[str] = [

@@ -1,6 +1,6 @@
 [project]
 name = "kangpaket"
-version = "1.0.0"
+version = "1.0.2"
 description = "Internal HTTP API Client Desktop App"
 requires-python = ">=3.11"
 dependencies = [
