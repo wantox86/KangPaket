@@ -13,9 +13,10 @@ from app.models.request_model import RequestProfile
 from app.config import METHOD_COLORS
 
 # Above this many requests, per-row CTk widgets (CTkFrame + CTkCheckBox +
-# labels) become slow/unstable to create (thousands of themed widgets in one
-# scrollable frame). Fall back to a single virtualized tk.Listbox instead.
-LARGE_IMPORT_THRESHOLD = 150
+# labels) become very slow: cost is super-linear on macOS/Tk 9 (measured
+# 10 rows ~1s, 15 ~1.8s, 20 ~3.4s, 40 ~18s, 80 ~2min). Fall back to a single
+# virtualized tk.Listbox instead.
+LARGE_IMPORT_THRESHOLD = 15
 
 
 class PostmanImportDialog(ctk.CTkToplevel):

@@ -60,8 +60,11 @@ class RunnerWindow(ctk.CTkToplevel):
         self._count_done    = 0
         self._count_total   = 0
 
-        # Max rows rendered as full widgets; beyond this only counters update
-        self._MAX_RENDERED_ROWS = 500
+        # Max rows rendered as full widgets; beyond this only counters update.
+        # Kept small on purpose: each RunnerResultRow is ~8 CTk widgets and cost is
+        # super-linear on macOS/Tk 9 (measured 10 rows 0.3s, 25 rows 2.5s, 50 rows
+        # 17.6s, so the old cap of 500 effectively hangs). Full results stay in Export.
+        self._MAX_RENDERED_ROWS = 30
 
         # Ordered checklist items: list of (profile, BooleanVar)
         self._checklist: list[tuple[RequestProfile, ctk.BooleanVar]] = []
