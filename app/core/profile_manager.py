@@ -20,6 +20,18 @@ class ProfileManager:
     def __init__(self, profiles_dir: str = PROFILES_DIR) -> None:
         self._dir = profiles_dir
         os.makedirs(self._dir, exist_ok=True)
+        self._listeners: list = []
+
+    def on_change(self, callback) -> None:
+        """Register callback(event, profile_id); event is 'save' or 'delete'."""
+        self._listeners.append(callback)
+
+    def _notify(self, event: str, profile_id: str) -> None:
+        for cb in list(self._listeners):
+            try:
+                cb(event, profile_id)
+            except Exception as e:
+                print(f"[ProfileManager] listener failed: {e}")
 
     # ------------------------------------------------------------------
     # CRUD
@@ -46,24 +58,34 @@ class ProfileManager:
 
         return profiles
 
-    def save_profile(self, profile: RequestProfile) -> None:
-        """Simpan satu profil ke disk (create atau update)."""
-        profile.updated_at = _now_iso()
+    def save_profile(self, profile: RequestProfile, *, touch: bool = True, notify: bool = True) -> None:
+        """Simpan satu profil ke disk (create atau update).
+
+        touch=False keeps profile.updated_at as is; notify=False skips listeners
+        (both used when applying data pulled from the sync server).
+        """
+        if touch:
+            profile.updated_at = _now_iso()
         path = os.path.join(self._dir, f"{profile.id}.json")
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(profile.to_dict(), f, indent=2, ensure_ascii=False)
         except OSError as e:
             raise RuntimeError(f"Gagal menyimpan profil '{profile.name}': {e}") from e
+        if notify:
+            self._notify("save", profile.id)
 
-    def delete_profile(self, profile_id: str) -> None:
+    def delete_profile(self, profile_id: str, *, notify: bool = True) -> None:
         """Hapus profil dari disk."""
         path = os.path.join(self._dir, f"{profile_id}.json")
         try:
-            if os.path.exists(path):
+            existed = os.path.exists(path)
+            if existed:
                 os.remove(path)
         except OSError as e:
             raise RuntimeError(f"Failed to delete profile {profile_id}: {e}") from e
+        if existed and notify:
+            self._notify("delete", profile_id)
 
     def get_profile(self, profile_id: str) -> RequestProfile | None:
         """Load satu profil by ID."""
