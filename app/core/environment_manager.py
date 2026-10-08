@@ -9,6 +9,7 @@ whenever its content changes on save; Cloud Sync uses it for last-write-wins.
 """
 import json
 import os
+import threading
 import time
 
 from app.config import ENVIRONMENTS_FILE
@@ -30,6 +31,8 @@ def _layer(variables: list[Variable]) -> dict[str, str]:
 class EnvironmentManager:
     def __init__(self, path: str = ENVIRONMENTS_FILE) -> None:
         self._path = path
+        # Guards stamping/writing against the Cloud Sync thread applying remote changes.
+        self._lock = threading.RLock()
         self.active_id: str | None = None
         self.globals: list[Variable] = []
         self.envs: list[Environment] = []
@@ -99,8 +102,9 @@ class EnvironmentManager:
         return changed or bool(removed), removed
 
     def save(self) -> None:
-        changed, removed = self._stamp()
-        self._write()
+        with self._lock:
+            changed, removed = self._stamp()
+            self._write()
         for env_id in removed:
             for cb in list(self._delete_listeners):
                 self._safe(cb, env_id)
@@ -182,27 +186,30 @@ class EnvironmentManager:
     # ------------------------------------------------------------------
 
     def apply_remote_env(self, env: Environment) -> None:
-        for i, existing in enumerate(self.envs):
-            if existing.id == env.id:
-                self.envs[i] = env
-                break
-        else:
-            self.envs.append(env)
-        self._env_digests[env.id] = self._env_digest(env)
-        self._write()
+        with self._lock:
+            for i, existing in enumerate(self.envs):
+                if existing.id == env.id:
+                    self.envs[i] = env
+                    break
+            else:
+                self.envs.append(env)
+            self._env_digests[env.id] = self._env_digest(env)
+            self._write()
 
     def apply_remote_delete(self, env_id: str) -> None:
-        self.envs = [e for e in self.envs if e.id != env_id]
-        self._env_digests.pop(env_id, None)
-        if self.get(self.active_id) is None:
-            self.active_id = None
-        self._write()
+        with self._lock:
+            self.envs = [e for e in self.envs if e.id != env_id]
+            self._env_digests.pop(env_id, None)
+            if self.get(self.active_id) is None:
+                self.active_id = None
+            self._write()
 
     def apply_remote_globals(self, variables: list[Variable], updated_at: int) -> None:
-        self.globals = variables
-        self.globals_updated_at = updated_at
-        self._globals_digest = self._vars_digest(variables)
-        self._write()
+        with self._lock:
+            self.globals = variables
+            self.globals_updated_at = updated_at
+            self._globals_digest = self._vars_digest(variables)
+            self._write()
 
     def changed(self) -> None:
         """Persist and notify; call after mutating envs/globals in place."""

@@ -104,6 +104,7 @@ class SyncManager:
         self._failures = 0
         self._attached = False
         self._snap: dict[str, dict] = {}
+        self.last_result: SyncResult | None = None   # summary of the last successful cycle
         self._status = SyncStatus(SyncPhase.LOGGED_OUT)
         self._status = self._make_status(
             SyncPhase.IDLE if state.logged_in else SyncPhase.LOGGED_OUT,
@@ -149,6 +150,7 @@ class SyncManager:
 
     def logout(self) -> None:
         self.client.logout()
+        self.last_result = None
         self._due_at = None
         self._set_status(SyncPhase.LOGGED_OUT)
 
@@ -199,6 +201,7 @@ class SyncManager:
             self.state.last_sync_at = now_ms()
             self.state.last_status, self.state.last_error = "ok", ""
             self.state.save()
+            self.last_result = result
             self._set_status(SyncPhase.IDLE)
         if result.local_changed and self.on_data_changed:
             try:
@@ -222,7 +225,7 @@ class SyncManager:
 
     def _load_snapshot(self) -> None:
         profiles = {p.id: p for p in self._pm.load_all_profiles()}
-        envs = {e.id: e for e in self._em.envs}
+        envs = {e.id: e for e in list(self._em.envs)}
         envs[m.GLOBALS_ID] = m.globals_as_environment(self._em.globals, self._em.globals_updated_at)
         self._snap = {m.PROFILE: profiles, m.ENVIRONMENT: envs}
 
