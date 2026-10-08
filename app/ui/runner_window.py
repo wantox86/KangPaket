@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from app.core.http_client import HttpClient
 from app.core.profile_manager import ProfileManager
+from app.core.environment_manager import EnvironmentManager
 from app.core.runner_engine import RunnerEngine
 from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
@@ -30,6 +31,7 @@ class RunnerWindow(ctk.CTkToplevel):
         parent,
         profile_manager: ProfileManager,
         settings: SettingsManager,
+        environments: EnvironmentManager,
         on_open_profile: callable | None = None,
         preselect_collection: str | None = None,
     ) -> None:
@@ -43,7 +45,8 @@ class RunnerWindow(ctk.CTkToplevel):
         self._pm              = profile_manager
         self._settings        = settings
         self._on_open_profile = on_open_profile
-        self._engine          = RunnerEngine(HttpClient(), settings, tk_root=None)
+        self._environments    = environments
+        self._engine          = RunnerEngine(HttpClient(), settings, tk_root=None, environments=environments)
         self._runner_result: RunnerResult | None = None
         self._running         = False
         self._start_time: float = 0.0
@@ -113,6 +116,17 @@ class RunnerWindow(ctk.CTkToplevel):
         ctk.CTkEntry(row, textvariable=self._run_name_var, font=("Segoe UI", 12), height=28).pack(
             side="left", fill="x", expand=True
         )
+
+        # Active environment (read-only; switch it from the main window)
+        env_row = ctk.CTkFrame(parent, fg_color="transparent")
+        env_row.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(env_row, text="Environment:", width=110, anchor="w", font=("Segoe UI", 12)).pack(side="left")
+        active_env = self._environments.active
+        ctk.CTkLabel(
+            env_row,
+            text=active_env.name if active_env else "No Environment",
+            anchor="w", font=("Segoe UI", 12), text_color="#94a3b8",
+        ).pack(side="left")
 
         # Collection dropdown
         row2 = ctk.CTkFrame(parent, fg_color="transparent")

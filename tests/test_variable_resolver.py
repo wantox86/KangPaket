@@ -8,6 +8,9 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.environment_manager import EnvironmentManager
+from app.core.postman_importer import (
+    PostmanImportError, parse_postman_environment, parse_postman_file,
+)
 from app.core.runner_engine import RunnerEngine
 from app.core.variable_resolver import resolve_profile, resolve_text
 from app.models.environment_model import Environment, Variable
@@ -170,6 +173,73 @@ class RunnerIntegrationTests(unittest.TestCase):
     def test_old_methods_removed(self):
         self.assertFalse(hasattr(RunnerEngine, "_substitute_vars"))
         self.assertFalse(hasattr(RunnerEngine, "_apply_vars_to_profile"))
+
+
+class PostmanVariableTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _write(self, name, data):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w") as f:
+            json.dump(data, f)
+        return path
+
+    def _collection(self, variable):
+        return {
+            "info": {"name": "Demo", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+            "variable": variable,
+            "item": [{"name": "r", "request": {
+                "method": "GET",
+                "url": "{{base}}/x/{{other}}",
+                "header": [{"key": "A", "value": "{{base}}"}],
+            }}],
+        }
+
+    def test_collection_variables_become_variables(self):
+        path = self._write("c.json", self._collection([
+            {"key": "base", "value": "https://h"},
+            {"key": "ApiPassword", "value": "pw"},
+            {"key": "off", "value": "1", "disabled": True},
+            {"value": "nokey"},
+        ]))
+        result = parse_postman_file(path)
+        by_key = {v.key: v for v in result.variables}
+        self.assertEqual(set(by_key), {"base", "ApiPassword", "off"})
+        self.assertFalse(by_key["base"].secret)
+        self.assertTrue(by_key["ApiPassword"].secret)
+        self.assertFalse(by_key["off"].enabled)
+        info = [w for w in result.warnings if "imported as environment" in w]
+        self.assertEqual(len(info), 1)
+        self.assertFalse(any("not converted" in w for w in result.warnings))
+        # url still has an unknown {{other}}, header only has known {{base}}
+        self.assertTrue(any("URL contains" in w for w in result.warnings))
+        self.assertFalse(any("header" in w and "variable" in w for w in result.warnings))
+
+    def test_no_variables_keeps_placeholder_warning(self):
+        result = parse_postman_file(self._write("c.json", self._collection([])))
+        self.assertEqual(result.variables, [])
+        self.assertTrue(any("URL contains" in w for w in result.warnings))
+
+    def test_environment_file(self):
+        path = self._write("e.postman_environment.json", {
+            "name": "Staging",
+            "values": [
+                {"key": "host", "value": "s.io", "enabled": True},
+                {"key": "token", "value": "t", "enabled": False},
+                {"key": "x", "value": "y", "type": "secret"},
+            ],
+        })
+        env = parse_postman_environment(path)
+        self.assertEqual(env.name, "Staging")
+        self.assertEqual([(v.key, v.enabled, v.secret) for v in env.vars],
+                         [("host", True, False), ("token", False, True), ("x", True, True)])
+
+    def test_collection_is_not_environment(self):
+        path = self._write("c.json", self._collection([]))
+        with self.assertRaises(PostmanImportError):
+            parse_postman_environment(path)
 
 
 if __name__ == "__main__":
