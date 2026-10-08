@@ -11,6 +11,7 @@ import customtkinter as ctk
 from app.config import (
     HTTP_METHODS, METHOD_COLORS, FONT_MONO, RAW_CONTENT_TYPES,
 )
+from app.core.environment_manager import EnvironmentManager
 from app.core.http_client import HttpClient
 from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
@@ -24,6 +25,7 @@ class RequestPanel(ctk.CTkFrame):
         self,
         parent,
         settings: SettingsManager,
+        environments: EnvironmentManager,
         on_response=None,
         on_status=None,
         on_save=None,
@@ -32,6 +34,7 @@ class RequestPanel(ctk.CTkFrame):
     ):
         super().__init__(parent, corner_radius=0, **kwargs)
         self._settings     = settings
+        self._environments = environments
         self._on_response  = on_response   # callback(ResponseResult)
         self._on_status    = on_status     # callback(str)
         self._on_save      = on_save       # callback(RequestProfile) → opens ProfileDialog
@@ -619,10 +622,11 @@ class RequestPanel(ctk.CTkFrame):
         proxy_enabled   = self._settings.get("proxy_enabled", False)
         proxy_http      = self._settings.get("proxy_http", "")
         proxy_https     = self._settings.get("proxy_https", "")
+        layers          = self._environments.layers()
 
         threading.Thread(
             target=self._do_send,
-            args=(profile, timeout, proxy_enabled, proxy_http, proxy_https),
+            args=(profile, timeout, proxy_enabled, proxy_http, proxy_https, layers),
             daemon=True,
         ).start()
 
@@ -633,6 +637,7 @@ class RequestPanel(ctk.CTkFrame):
         proxy_enabled: bool = False,
         proxy_http: str = "",
         proxy_https: str = "",
+        layers: list[dict[str, str]] | None = None,
     ) -> None:
         result = self._http_client.send(
             profile,
@@ -640,6 +645,7 @@ class RequestPanel(ctk.CTkFrame):
             proxy_enabled=proxy_enabled,
             proxy_http=proxy_http,
             proxy_https=proxy_https,
+            variables=layers,
         )
         self.after(0, self._on_send_done, result)
 
