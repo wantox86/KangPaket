@@ -127,6 +127,11 @@ class EnvironmentDialog(ctk.CTkToplevel):
             self._editor.set_variables(env.vars)
         self._highlight()
 
+    def reload_from_manager(self) -> None:
+        """Re-read list + selection after Cloud Sync changed environments (UI thread)."""
+        self._refresh_list()
+        self._load_selected()
+
     def _commit(self) -> None:
         variables = self._editor.get_variables()
         env = self._current_env()

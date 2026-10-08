@@ -43,6 +43,9 @@ class RequestPanel(ctk.CTkFrame):
         self._sending      = False
         self._current_profile_id: str | None = None  # ID profil yang sedang dibuka
         self._is_dirty     = False          # unsaved changes flag
+        # updated_at of the saved profile as loaded/saved here (None = nothing saved is open);
+        # Cloud Sync uses it to detect that the open profile changed on disk.
+        self.loaded_updated_at: str | None = None
 
         self._build_url_bar()
         self._build_tabs()
@@ -489,6 +492,7 @@ class RequestPanel(ctk.CTkFrame):
 
     def load_profile(self, profile: RequestProfile, is_saved: bool = False) -> None:
         self._current_profile_id = profile.id
+        self.loaded_updated_at = profile.updated_at if is_saved else None
         # Enable delete only for profiles that exist on disk
         self._delete_btn.configure(state="normal" if is_saved else "disabled")
         self._method_var.set(profile.method)
@@ -701,9 +705,14 @@ class RequestPanel(ctk.CTkFrame):
         self._is_dirty = False
         self._save_btn.configure(text="Save")
 
+    @property
+    def is_dirty(self) -> bool:
+        return self._is_dirty
+
     def clear_profile(self) -> None:
         """Reset panel to empty state (called after profile deletion)."""
         self._current_profile_id = None
+        self.loaded_updated_at = None
         self._delete_btn.configure(state="disabled")
 
     # ------------------------------------------------------------------
