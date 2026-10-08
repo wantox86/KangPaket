@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from app.config import USER_AGENT
 from app.models.request_model import RequestProfile
+from app.core.variable_resolver import resolve_profile
 from app.models.response_model import ResponseResult
 
 
@@ -19,10 +20,14 @@ class HttpClient:
         proxy_enabled: bool = False,
         proxy_http: str = "",
         proxy_https: str = "",
+        variables: list[dict[str, str]] | None = None,
     ) -> ResponseResult:
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         try:
+            if variables is not None:
+                profile = resolve_profile(profile, variables)
+
             timeout = profile.timeout if profile.timeout is not None else default_timeout
             # timeout=0 means no timeout
             httpx_timeout = None if timeout == 0 else timeout

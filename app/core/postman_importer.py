@@ -6,12 +6,50 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.models.environment_model import Environment, Variable
 from app.models.request_model import RequestProfile
+
+_SECRET_HINTS = ("password", "token", "secret", "key")
+_PLACEHOLDER = re.compile(r"\{\{([^}]+)\}\}")
+
+
+def is_secret_name(key: str) -> bool:
+    k = key.lower()
+    return any(h in k for h in _SECRET_HINTS)
+
+
+def has_unknown_placeholder(text: str, known: set[str]) -> bool:
+    """True if *text* has a {{name}} that is neither a known variable nor a $system one."""
+    for m in _PLACEHOLDER.findall(text):
+        name = m.strip()
+        if name not in known and not name.startswith("$"):
+            return True
+    return False
+
+
+def _to_variables(entries) -> list[Variable]:
+    """Convert Postman `variable[]` / environment `values[]` entries."""
+    out: list[Variable] = []
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        key = str(e.get("key") or "").strip()
+        if not key:
+            continue
+        value = e.get("value", e.get("current_value", ""))
+        out.append(Variable(
+            key=key,
+            value="" if value is None else str(value),
+            secret=is_secret_name(key) or e.get("type") == "secret",
+            enabled=not e.get("disabled", False) and e.get("enabled", True) is not False,
+        ))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +63,7 @@ class PostmanImportResult:
     profiles: list[RequestProfile]
     warnings: list[str]
     skipped: list[str]
+    variables: list[Variable] = field(default_factory=list)
 
 
 class PostmanImportError(Exception):
@@ -67,6 +106,32 @@ def parse_postman_file(path: str) -> PostmanImportResult:
     return result
 
 
+def parse_postman_environment(path: str) -> Environment:
+    """Read a *.postman_environment.json file into an Environment.
+
+    Raises PostmanImportError if the file is not a Postman environment."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise PostmanImportError(f"File cannot be read as JSON: {e}") from e
+    except OSError as e:
+        raise PostmanImportError(f"Cannot open file: {e}") from e
+
+    if not isinstance(data, dict) or not isinstance(data.get("values"), list) or "info" in data:
+        raise PostmanImportError("Not a Postman environment file.")
+    name = str(data.get("name") or "").strip() or "Imported Environment"
+    return Environment(name=name, vars=_to_variables(data["values"]))
+
+
+def is_postman_environment_file(path: str) -> bool:
+    try:
+        parse_postman_environment(path)
+        return True
+    except PostmanImportError:
+        return False
+
+
 def get_file_size_mb(path: str) -> float:
     try:
         return os.path.getsize(path) / (1024 * 1024)
@@ -85,6 +150,8 @@ class _PostmanParser:
         self._skipped:  list[str] = []
         self._has_scripts   = False
         self._has_variables = False
+        self._variables: list[Variable] = []
+        self._var_keys: set[str] = set()
 
     # ------------------------------------------------------------------
     # Entry point
@@ -122,6 +189,8 @@ class _PostmanParser:
         # Warn about collection-level variables
         if data.get("variable"):
             self._has_variables = True
+            self._variables = _to_variables(data["variable"])
+            self._var_keys = {v.key for v in self._variables if v.enabled}
 
         # Warn about auth at collection level
         col_auth = data.get("auth")
@@ -145,11 +214,14 @@ class _PostmanParser:
             self._warnings.append(
                 "Pre-request scripts and test scripts are ignored (not supported in V1)."
             )
-        if self._has_variables:
+        if self._variables:
+            names = ", ".join(v.key for v in self._variables)
             self._warnings.append(
-                "Collection variables are not converted. URLs/headers containing "
-                "{{variable}} are left as-is."
+                f"Collection variables ({names}) will be imported as environment "
+                f"'{collection_name}' and activated."
             )
+        elif self._has_variables:
+            self._warnings.append("Collection variables could not be converted (no usable keys).")
 
         return PostmanImportResult(
             collection_name=collection_name,
@@ -157,6 +229,7 @@ class _PostmanParser:
             profiles=profiles,
             warnings=self._warnings,
             skipped=self._skipped,
+            variables=self._variables,
         )
 
     # ------------------------------------------------------------------
@@ -270,7 +343,7 @@ class _PostmanParser:
             v = h.get("value", "").strip()
             if not k:
                 continue
-            if "{{" in v:
+            if has_unknown_placeholder(v, self._var_keys):
                 warnings.append(
                     f"'{name}': header '{k}' contains a Postman variable — left as-is."
                 )
@@ -350,7 +423,7 @@ class _PostmanParser:
                 except Exception:
                     pass
 
-        if "{{" in raw:
+        if has_unknown_placeholder(raw, self._var_keys):
             warnings.append(
                 f"'{item_name}': URL contains a Postman variable ({{...}}) — left as-is."
             )
