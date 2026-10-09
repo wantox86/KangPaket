@@ -82,3 +82,11 @@ RESULTS_DIR   = os.path.join(DATA_DIR, "runner_results")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 ENVIRONMENTS_FILE = os.path.join(DATA_DIR, "environments.json")
 ASSETS_DIR    = os.path.join(BASE_DIR, "assets")
+
+# Cloud Sync
+SYNC_STATE_FILE        = os.path.join(DATA_DIR, "sync_state.json")
+SYNC_DEFAULT_URL       = "https://kangpaket-api.quezacolt.my.id"
+SYNC_SETTINGS_URL_KEY  = "sync_server_url"   # optional override in settings.json
+SYNC_INTERVAL_SECONDS  = 90
+SYNC_DEBOUNCE_SECONDS  = 2.5
+SYNC_HTTP_TIMEOUT      = 20.0
