@@ -30,6 +30,7 @@ class SyncState:
     def _reset(self) -> None:
         self.server_url: str = ""
         self.username: str = ""
+        self.last_account: str = ""               # account whose data is on this device (survives session expiry)
         self.refresh_token: str = ""
         self.cursor: int = 0
         self.tombstones: list[dict] = []          # {"kind", "id", "deleted_at"}
@@ -61,6 +62,7 @@ class SyncState:
         self.server_url = str(data.get("server_url") or "")
         self.username = str(data.get("username") or "")
         self.refresh_token = str(data.get("refresh_token") or "")
+        self.last_account = str(data.get("last_account") or self.username)
         self.cursor = max(0, int(data.get("cursor") or 0))
         last = data.get("last_sync_at")
         self.last_sync_at = int(last) if last else None
@@ -82,6 +84,7 @@ class SyncState:
             "server_url": self.server_url,
             "username": self.username,
             "refresh_token": self.refresh_token,
+            "last_account": self.last_account,
             "cursor": self.cursor,
             "tombstones": self.tombstones,
             "known": self.known,
@@ -125,6 +128,7 @@ class SyncState:
                 self.known = {k: {} for k in KINDS}
                 self.last_sync_at = None
             self.server_url, self.username, self.refresh_token = server_url, username, refresh_token
+            self.last_account = username
             self.last_status, self.last_error = "", ""
             self.save()
 

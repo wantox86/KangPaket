@@ -6,6 +6,7 @@ Access token lives in memory only; the refresh token is persisted in SyncState.
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -68,6 +69,15 @@ def resolve_server_url(settings=None, state: SyncState | None = None) -> str:
     return (url or SYNC_DEFAULT_URL).strip().rstrip("/")
 
 
+@dataclass(frozen=True)
+class PendingLogin:
+    """Tokens of a successful login that has not been stored yet (account-switch confirmation)."""
+    base_url: str
+    username: str
+    access_token: str = field(repr=False)
+    refresh_token: str = field(repr=False)
+
+
 class SyncClient:
     def __init__(
         self,
@@ -99,9 +109,23 @@ class SyncClient:
     # ------------------------------------------------------------------
 
     def login(self, username: str, password: str) -> None:
+        self.commit_login(self.authenticate(username, password))
+
+    def authenticate(self, username: str, password: str) -> "PendingLogin":
+        """Validate credentials against the server WITHOUT storing anything locally."""
         data = self._send("POST", "/auth/login", json={"username": username, "password": password})
-        self._access_token = data["access_token"]
-        self._state.begin_session(self.base_url, username.strip().lower(), data["refresh_token"])
+        return PendingLogin(self.base_url, username.strip().lower(), data["access_token"], data["refresh_token"])
+
+    def commit_login(self, pending: "PendingLogin") -> None:
+        self._access_token = pending.access_token
+        self._state.begin_session(pending.base_url, pending.username, pending.refresh_token)
+
+    def discard_login(self, pending: "PendingLogin") -> None:
+        """Revoke an authenticated-but-never-committed login (best effort); local state untouched."""
+        try:
+            self._send("POST", "/auth/logout", json={"refresh_token": pending.refresh_token})
+        except SyncError:
+            pass
 
     def logout(self) -> None:
         """Best-effort server logout; local session is always cleared."""

@@ -169,20 +169,6 @@ def test_controller_sync_now_and_errors(server, dev):
     assert dev.sm.status.phase == SyncPhase.OFFLINE
 
 
-def test_controller_logout_keeps_local_data(server, dev):
-    ctl = SyncUiController(dev.sm, run_sync_dispatch)
-    dev.login()
-    dev.pm.save_profile(mk_profile("Keep"))
-    dev.em.add(Environment("EnvKeep", [Variable("a", "1")]))
-    done = threading.Event()
-    ctl.logout_async(done.set)
-    wait(done)
-    assert not dev.state.logged_in and dev.sm.status.phase == SyncPhase.LOGGED_OUT
-    assert dev.sm.last_result is None
-    assert [p.name for p in dev.pm.load_all_profiles()] == ["Keep"]
-    assert [e.name for e in dev.em.envs] == ["EnvKeep"]
-
-
 # ---------------------------------------------------------------- hooks (auto-sync on change)
 
 def test_local_changes_request_sync_but_active_env_switch_does_not(server, tmp_path, monkeypatch):

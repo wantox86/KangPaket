@@ -87,6 +87,17 @@ class ProfileManager:
         if existed and notify:
             self._notify("delete", profile_id)
 
+    def delete_all(self) -> int:
+        """Silently remove every loadable profile (no listeners, so no sync tombstones).
+
+        Used when the local data of a Cloud Sync account is cleared. Returns how many were removed.
+        """
+        count = 0
+        for profile in self.load_all_profiles():
+            self.delete_profile(profile.id, notify=False)
+            count += 1
+        return count
+
     def get_profile(self, profile_id: str) -> RequestProfile | None:
         """Load satu profil by ID."""
         path = os.path.join(self._dir, f"{profile_id}.json")

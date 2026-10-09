@@ -211,6 +211,22 @@ class EnvironmentManager:
             self._globals_digest = self._vars_digest(variables)
             self._write()
 
+    def clear_all(self) -> int:
+        """Silently drop every environment, reset Globals and the active selection.
+
+        No stamping and no listeners (so no tombstones are recorded). Used when the local data
+        of a Cloud Sync account is cleared. Returns the number of items removed.
+        """
+        with self._lock:
+            count = len(self.envs) + (1 if self.globals else 0)
+            self.envs, self.globals = [], []
+            self.active_id = None
+            self.globals_updated_at = 0
+            self._env_digests = {}
+            self._globals_digest = self._vars_digest(self.globals)
+            self._write()
+        return count
+
     def changed(self) -> None:
         """Persist and notify; call after mutating envs/globals in place."""
         if self.get(self.active_id) is None:

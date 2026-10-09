@@ -20,7 +20,7 @@ from app.core import sync_mapping as m
 from app.core.environment_manager import EnvironmentManager
 from app.core.profile_manager import ProfileManager
 from app.core.sync_client import (
-    AuthError, NetworkError, PayloadTooLarge, RateLimited, SyncClient, SyncError,
+    AuthError, NetworkError, PayloadTooLarge, PendingLogin, RateLimited, SyncClient, SyncError,
 )
 from app.core.sync_state import SyncState, now_ms
 
@@ -62,6 +62,24 @@ class SyncResult:
         return bool(self.applied_local or self.deleted_local)
 
 
+class AccountSwitchRequired(SyncError):
+    """Login succeeded on the server, but this device still holds another account's data.
+
+    Nothing was stored or synced. Call confirm_account_switch() (wipes the local data, then
+    signs in) or cancel_account_switch() (revokes the new login, local data untouched).
+    """
+
+    def __init__(self, old_account: str, new_account: str) -> None:
+        super().__init__("Data lokal milik akun lain.")
+        self.old_account = old_account
+        self.new_account = new_account
+
+
+def account_label(username: str, server_url: str, other_server_url: str) -> str:
+    """Username, plus the server when only the server differs between two accounts."""
+    return username if server_url == other_server_url else f"{username} @ {server_url}"
+
+
 class SyncManager:
     def __init__(
         self,
@@ -72,6 +90,7 @@ class SyncManager:
         *,
         on_status: Callable[[SyncStatus], None] | None = None,
         on_data_changed: Callable[[SyncResult], None] | None = None,
+        on_wiped: Callable[[], None] | None = None,
         interval: float = SYNC_INTERVAL_SECONDS,
         debounce: float = SYNC_DEBOUNCE_SECONDS,
         backoff_base: float = 5.0,
@@ -81,6 +100,7 @@ class SyncManager:
         on_status / on_data_changed may be invoked from the runner thread: UI code must
         marshal them to the UI thread (e.g. widget.after(0, ...)).
         on_data_changed fires after a sync that modified local profiles/environments.
+        on_wiped fires after all local profiles/environments were cleared (logout, account switch).
         """
         self._pm = profiles
         self._em = environments
@@ -88,6 +108,8 @@ class SyncManager:
         self.client = client
         self.on_status = on_status
         self.on_data_changed = on_data_changed
+        self.on_wiped = on_wiped
+        self._pending_login: PendingLogin | None = None
         self._interval = interval
         self._debounce = debounce
         self._backoff_base = backoff_base
@@ -141,20 +163,106 @@ class SyncManager:
     # ------------------------------------------------------------------
 
     def login(self, username: str, password: str) -> None:
-        """Raises SyncError subclasses (AuthError for wrong credentials). Triggers a sync if running."""
+        """Raises SyncError subclasses (AuthError for wrong credentials). Triggers a sync if running.
+
+        Raises AccountSwitchRequired (nothing stored, nothing synced) when this device still holds
+        local data of a different account; resolve it with confirm_/cancel_account_switch().
+        """
         with self._sync_lock:   # never switch accounts in the middle of a sync cycle
-            self.client.login(username, password)
+            pending = self.client.authenticate(username, password)
+            if self._is_account_switch(pending):
+                self._discard_pending()
+                self._pending_login = pending
+                raise AccountSwitchRequired(
+                    account_label(self.state.last_account, self.state.server_url, pending.base_url),
+                    account_label(pending.username, pending.base_url, self.state.server_url),
+                )
+            self._discard_pending()
+            self.client.commit_login(pending)
+        self._after_login()
+
+    def confirm_account_switch(self) -> None:
+        """User agreed to replace the previous account's local data: wipe, then sign in."""
+        with self._sync_lock:
+            pending, self._pending_login = self._pending_login, None
+            if pending is None:
+                raise SyncError("Tidak ada login yang menunggu konfirmasi.")
+            try:
+                if self.state.refresh_token:
+                    self.client.logout()   # revoke the previous session as well
+                self._wipe_local()
+            except Exception:
+                self.client.discard_login(pending)
+                raise
+            self.client.commit_login(pending)
+        self._notify_wiped()
+        self._after_login()
+
+    def cancel_account_switch(self) -> None:
+        """User declined: revoke the unused login; local data and state stay as they were."""
+        with self._sync_lock:
+            self._discard_pending()
+
+    def _discard_pending(self) -> None:
+        pending, self._pending_login = self._pending_login, None
+        if pending is not None:
+            self.client.discard_login(pending)
+
+    def _after_login(self) -> None:
         self._failures = 0
         self._backoff_until = 0.0
         self._set_status(SyncPhase.IDLE)
         self.request_sync(immediate=True)
 
+    def _is_account_switch(self, pending: PendingLogin) -> bool:
+        """True when the device holds a *different* account's data (never for first login)."""
+        last = self.state.last_account
+        if not last:
+            return False
+        same = pending.username == last and (
+            not self.state.server_url or pending.base_url == self.state.server_url)
+        return not same and self.has_local_data()
+
+    def has_local_data(self) -> bool:
+        return bool(self._pm.load_all_profiles() or self._em.envs or self._em.globals)
+
     def logout(self) -> None:
+        """End the session only; local data stays. The UI uses logout_and_wipe() instead."""
         with self._sync_lock:
             self.client.logout()
+        self._after_logout()
+
+    def logout_and_wipe(self) -> None:
+        """Server logout (best effort), then silently clear all local profiles/environments."""
+        with self._sync_lock:
+            self._wipe_local()      # first: if this fails the session stays and the user can retry
+            self.client.logout()
+        self._after_logout()
+        self._notify_wiped()
+
+    def _after_logout(self) -> None:
         self.last_result = None
         self._due_at = None
         self._set_status(SyncPhase.LOGGED_OUT)
+
+    def _wipe_local(self) -> int:
+        """Remove profiles, environments, Globals and the active env without tombstones or sync."""
+        return self._pm.delete_all() + self._em.clear_all()
+
+    def _notify_wiped(self) -> None:
+        if self.on_wiped:
+            try:
+                self.on_wiped()
+            except Exception as e:
+                print(f"[SyncManager] on_wiped failed: {e}")
+
+    def unsynced_summary(self) -> tuple[int, list[str]]:
+        """(items the server does not have yet, names of too-large items) per the current state."""
+        with self._sync_lock:
+            self._load_snapshot()
+            result = SyncResult()
+            changes = self._collect_local_changes(result)
+            return len(changes) + result.skipped_invalid + len(result.skipped_large), list(result.skipped_large)
 
     # ------------------------------------------------------------------
     # Local change hooks

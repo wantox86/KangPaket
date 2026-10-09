@@ -184,3 +184,65 @@ def decide_open_profile_action(
     if disk_updated_at == loaded_updated_at:
         return ACTION_NONE
     return ACTION_WARN_CHANGED if dirty else ACTION_RELOAD
+
+
+# ---------------------------------------------------------------------------
+# Logout / account switch: what the user must confirm before local data is wiped
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LogoutBlockers:
+    """Why a logout (which clears local data) must not proceed silently."""
+    sync_error: str = ""                 # message of the failed final sync ("" = it succeeded)
+    unsynced: int = 0                    # local items the server does not have
+    skipped_large: tuple[str, ...] = ()  # names of items too large to sync
+    unsaved_edit: bool = False           # the editor holds edits that were never saved
+
+    @property
+    def needs_confirm(self) -> bool:
+        return bool(self.sync_error or self.unsynced or self.skipped_large or self.unsaved_edit)
+
+
+LOGOUT_TITLE = "Logout Cloud Sync"
+LOGOUT_CONFIRM_QUESTION = "Ada perubahan yang belum tersinkron dan akan hilang. Tetap logout dan hapus data lokal?"
+LOGOUT_CONFIRM_YES = "Tetap logout"
+SWITCH_CONFIRM_YES = "Lanjut"
+CONFIRM_CANCEL = "Batal"
+
+
+def logout_intro_text(username: str) -> str:
+    """First dialog: explains what logout does (it clears local data, like Postman)."""
+    return (
+        f"Keluar dari akun '{username or 'ini'}'?\n\n"
+        "• Perubahan terakhir disinkronkan ke server lebih dulu.\n"
+        "• Profile dan environment dihapus dari perangkat ini. Data tetap aman di server; "
+        "login lagi akan mengunduhnya kembali.\n"
+        "• Sinkronisasi otomatis berhenti dan sesi di perangkat ini dihapus.\n"
+        "• Pengaturan aplikasi (tema, Server URL, dll.) tidak dihapus."
+    )
+
+
+def logout_blockers_text(b: LogoutBlockers) -> str:
+    """Second dialog, shown only when something would be lost."""
+    lines = [LOGOUT_CONFIRM_QUESTION, ""]
+    if b.sync_error:
+        lines.append(f"• Sinkronisasi terakhir gagal: {_shorten(b.sync_error, 120)}")
+    if b.unsynced:
+        lines.append(f"• {b.unsynced} item belum terkirim ke server.")
+    if b.skipped_large:
+        names = ", ".join(b.skipped_large[:5])
+        more = f" (+{len(b.skipped_large) - 5} lainnya)" if len(b.skipped_large) > 5 else ""
+        lines.append(f"• Terlalu besar untuk disinkronkan (>256 KiB): {names}{more}")
+    if b.unsaved_edit:
+        lines.append("• Ada request yang sedang diedit dan belum disimpan.")
+    return "\n".join(lines)
+
+
+def account_switch_text(old_account: str, new_account: str, unsaved_edit: bool = False) -> str:
+    text = (
+        f"Data lokal milik akun {old_account}. Login sebagai {new_account} akan menghapus "
+        "data lokal itu (belum tersinkron bisa hilang). Lanjut?"
+    )
+    if unsaved_edit:
+        text += "\n\nRequest yang sedang diedit dan belum disimpan juga akan hilang."
+    return text
