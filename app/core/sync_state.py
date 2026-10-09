@@ -51,8 +51,8 @@ class SyncState:
                 self._from_dict(data)
             except FileNotFoundError:
                 return
-            except (json.JSONDecodeError, OSError, AttributeError, TypeError, ValueError) as e:
-                print(f"[SyncState] Failed to load sync state: {e}. Starting empty.")
+            except (json.JSONDecodeError, OSError, AttributeError, TypeError, ValueError, KeyError) as e:
+                print(f"[SyncState] Failed to load sync state: {type(e).__name__}. Starting empty.")
                 self._reset()
 
     def _from_dict(self, data: dict) -> None:

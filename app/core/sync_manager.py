@@ -142,14 +142,16 @@ class SyncManager:
 
     def login(self, username: str, password: str) -> None:
         """Raises SyncError subclasses (AuthError for wrong credentials). Triggers a sync if running."""
-        self.client.login(username, password)
+        with self._sync_lock:   # never switch accounts in the middle of a sync cycle
+            self.client.login(username, password)
         self._failures = 0
         self._backoff_until = 0.0
         self._set_status(SyncPhase.IDLE)
         self.request_sync(immediate=True)
 
     def logout(self) -> None:
-        self.client.logout()
+        with self._sync_lock:
+            self.client.logout()
         self.last_result = None
         self._due_at = None
         self._set_status(SyncPhase.LOGGED_OUT)
@@ -282,8 +284,8 @@ class SyncManager:
 
         if lts is None:
             if not deleted:
-                self._apply_live(kind, item, result)
-                known[item_id] = sts
+                if self._apply_live(kind, item, result):
+                    known[item_id] = sts
             else:
                 known.pop(item_id, None)
             return
@@ -291,9 +293,7 @@ class SyncManager:
         if deleted:
             if sts >= lts:
                 self._apply_delete(kind, item_id, result)
-                known.pop(item_id, None)
-            else:
-                known.pop(item_id, None)   # local is newer: push will resurrect it
+            known.pop(item_id, None)   # (if local is newer, push will resurrect it)
             return
 
         if sts > lts:
@@ -309,8 +309,10 @@ class SyncManager:
             winner = "same" if skey == lkey else ("server" if skey > lkey else "local")
 
         if winner == "server":
-            self._apply_live(kind, item, result)
-            known[item_id] = sts
+            if self._apply_live(kind, item, result):
+                known[item_id] = sts
+            else:
+                known.pop(item_id, None)   # edited meanwhile: push it next
         elif winner == "same":
             known[item_id] = sts
         else:
@@ -318,7 +320,21 @@ class SyncManager:
 
     # ---- apply to local storage (silent: no manager listeners fire) -----
 
-    def _apply_live(self, kind: str, item: dict, result: SyncResult) -> None:
+    def _edited_since_snapshot(self, kind: str, item_id: str) -> bool:
+        """True if the user changed this profile on disk after the snapshot was taken.
+
+        Applying server data then would silently overwrite that edit; skip instead and let
+        the next cycle (the edit schedules one) push it. Environments are live objects, so
+        their snapshot never goes stale.
+        """
+        if kind != m.PROFILE:
+            return False
+        current = self._pm.get_profile(item_id)
+        return (m.profile_ts(current) if current else None) != self._local_ts(kind, item_id)
+
+    def _apply_live(self, kind: str, item: dict, result: SyncResult) -> bool:
+        if self._edited_since_snapshot(kind, item["id"]):
+            return False
         if kind == m.PROFILE:
             profile = m.profile_from_wire(item)
             self._pm.save_profile(profile, touch=False, notify=False)
@@ -332,16 +348,20 @@ class SyncManager:
             self._em.apply_remote_env(env)
             self._snap[kind][env.id] = env
         result.applied_local += 1
+        return True
 
-    def _apply_delete(self, kind: str, item_id: str, result: SyncResult) -> None:
+    def _apply_delete(self, kind: str, item_id: str, result: SyncResult) -> bool:
+        if self._edited_since_snapshot(kind, item_id):
+            return False
         if kind == m.PROFILE:
             self._pm.delete_profile(item_id, notify=False)
         elif item_id == m.GLOBALS_ID:
-            return   # Globals is never deleted
+            return False   # Globals is never deleted
         else:
             self._em.apply_remote_delete(item_id)
         self._snap[kind].pop(item_id, None)
         result.deleted_local += 1
+        return True
 
     # ---- push ----------------------------------------------------------
 
@@ -378,6 +398,9 @@ class SyncManager:
         return out
 
     def _push(self, result: SyncResult) -> None:
+        # Re-read local data: edits/deletes made while the pull was in flight must not be
+        # mistaken for "unchanged" (a stale snapshot would also discard a fresh tombstone).
+        self._load_snapshot()
         changes = self._collect_local_changes(result)
         batch: list[tuple[str, str, dict, int]] = []
         size = 0
@@ -437,8 +460,10 @@ class SyncManager:
             known.pop(item_id, None)
             return
         try:
-            self._apply_live(kind, server, result)
-            known[item_id] = int(server["client_updated_at"])
+            if self._apply_live(kind, server, result):
+                known[item_id] = int(server["client_updated_at"])
+            else:
+                known.pop(item_id, None)
         except (KeyError, TypeError, ValueError, RuntimeError) as e:
             result.warnings.append(f"Item {item_id}: data server tidak bisa diterapkan ({e})")
 

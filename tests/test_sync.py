@@ -443,3 +443,74 @@ def test_only_one_sync_at_a_time(server, dev):
     ts = [threading.Thread(target=dev.sm.sync_now) for _ in range(3)]
     [t.start() for t in ts]; [t.join() for t in ts]
     assert peak[0] == 1
+
+
+# ---------------------------------------------------------------- review fixes (phase 7)
+
+def test_state_malformed_tombstone_entry_does_not_crash(tmp_path):
+    path = tmp_path / "sync_state.json"
+    path.write_text(json.dumps({"refresh_token": "x", "tombstones": [{"kind": "profile"}]}))
+    s = SyncState(str(path))
+    assert not s.logged_in and s.tombstones == []
+
+
+def test_edit_during_pull_is_not_overwritten_by_server_copy(tmp_path, server, dev):
+    p = mk_profile("orig")
+    dev.pm.save_profile(p)
+    dev.login(); dev.sm.sync_now()
+    b = Device(tmp_path, server, "devb"); b.login(); b.sm.sync_now()
+    theirs = b.pm.get_profile(p.id); theirs.name = "from-b"; b.pm.save_profile(theirs)
+    b.sm.sync_now()
+    real_pull = dev.client.pull
+
+    def pull_then_user_edits(since, limit=500):
+        page = real_pull(since, limit)
+        mine = dev.pm.get_profile(p.id); mine.name = "typed-during-pull"
+        time.sleep(0.01)
+        dev.pm.save_profile(mine)
+        return page
+
+    dev.client.pull = pull_then_user_edits
+    dev.sm.sync_now()
+    dev.client.pull = real_pull
+    assert dev.pm.get_profile(p.id).name == "typed-during-pull"
+    dev.sm.sync_now()
+    assert server.live("alice", "profile")[p.id]["payload"]["name"] == "typed-during-pull"
+
+
+def test_delete_during_pull_is_not_resurrected(server, dev):
+    p = mk_profile("doomed")
+    dev.pm.save_profile(p)
+    dev.login(); dev.sm.sync_now()
+    real_pull = dev.client.pull
+
+    def pull_then_user_deletes(since, limit=500):
+        page = real_pull(since, limit)
+        dev.pm.delete_profile(p.id)
+        return page
+
+    dev.client.pull = pull_then_user_deletes
+    dev.sm.sync_now()
+    dev.client.pull = real_pull
+    dev.sm.sync_now()
+    assert p.id not in dev.profile_ids()
+    assert p.id in server.tombstones("alice", "profile")
+
+
+def test_login_waits_for_running_sync(server, dev):
+    dev.login()
+    entered, release = threading.Event(), threading.Event()
+    real_pull = dev.client.pull
+
+    def slow_pull(since, limit=500):
+        entered.set(); release.wait(5)
+        return real_pull(since, limit)
+
+    dev.client.pull = slow_pull
+    t = threading.Thread(target=dev.sm.sync_now); t.start()
+    assert entered.wait(5)
+    done = threading.Event()
+    threading.Thread(target=lambda: (dev.sm.logout(), done.set())).start()
+    assert not done.wait(0.3)       # logout blocked while a cycle is in flight
+    release.set(); t.join(5)
+    assert done.wait(5)

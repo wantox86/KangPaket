@@ -322,7 +322,9 @@ class AccountDialog(ctk.CTkToplevel):
             f"Keluar dari akun '{user}'?\n\n"
             "• Sinkronisasi otomatis berhenti dan sesi di perangkat ini dihapus.\n"
             "• Profile dan environment di perangkat ini TIDAK dihapus; tetap tersimpan lokal.\n"
-            "• Data di server juga tidak dihapus.\n\n"
+            "• Data di server juga tidak dihapus.\n"
+            "• Perhatian: jika nanti login dengan akun BERBEDA di perangkat ini, data lokal ini "
+            "akan ikut digabung dan diunggah ke akun baru tersebut.\n\n"
             "Perubahan berikutnya tidak akan disinkronkan sampai Anda login lagi.",
             parent=self,
         ):
