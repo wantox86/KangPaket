@@ -69,11 +69,13 @@ build.bat              # → dist\KangPaket.exe
 
 KangPaket can sync your profiles and environments across devices through a KangPaket sync server (optional; the app works fully offline without it).
 
-- **Login**: click the account button (top bar, shows "Belum login") or `Tools > Akun Cloud Sync…`, enter username and password. Registration is done by the server admin. After the first login your local and server data are merged (nothing is lost). The password is never stored; only a refresh token is kept in `data/sync_state.json` (owner-only permissions).
+- **Login**: click the account button (top bar, shows "Belum login") or `Tools > Akun Cloud Sync…`, enter username and password. Registration is done by the server admin. After the first login your local and server data are merged (nothing is lost). The password is never stored; only a refresh token is kept in `data/sync_state.json` (owner-only permissions on macOS/Linux; on Windows file permissions are not restricted, so protect your user profile).
 - **What is synced**: request profiles (including collection/folder), environments and global variables. Edits sync automatically a few seconds after you save; switching the active environment does not trigger a sync. Profiles above 256 KiB are skipped (and reported in the account dialog).
 - **Auth fields are synced as-is**: bearer tokens, basic-auth passwords, API keys and secret variables are stored **in plaintext on the sync server** (not encrypted). Only use a server you trust, and avoid syncing real production secrets.
 - **Offline behaviour**: if the server is unreachable the app keeps working locally; the status shows "Offline (coba lagi dalam Ns)" and retries with backoff. "Perlu login ulang" means the session expired - click the account button and log in again (your local data and sync position are kept).
-- **Logout** stops syncing but never deletes local data. Open profiles with unsaved edits are never overwritten by a server update; a warning is shown in the status bar instead.
+- **Conflicts**: last write wins, compared by each item's edit time on the device's clock. Keep the system clock correct on every device: a device whose clock is far behind will see its edits overwritten by older edits from other devices.
+- **Logout** stops syncing but never deletes local data. Open profiles with unsaved edits are never overwritten by a server update; a warning is shown in the status bar instead. Items deleted while logged out (or before logout but not yet synced) are not propagated and come back after the next login.
+- **Switching accounts on the same device**: local data is kept on logout, so logging in as a *different* user merges the profiles and environments still on this device into that new account (they are uploaded to it). If the accounts must stay separate, remove the local data (or use a separate copy of the app / `data/` folder) before logging in as the other user.
 - **Server URL**: defaults to `https://kangpaket-api.quezacolt.my.id`. Override it in the login dialog under "Lanjutan", or by setting `"sync_server_url"` in `data/settings.json`.
 
 ## Data Storage
