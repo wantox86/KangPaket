@@ -10,8 +10,9 @@ import customtkinter as ctk
 from app.core.sync_controller import SyncUiController
 from app.core.sync_manager import SyncPhase
 from app.core.sync_presenter import (
-    LEVEL_COLORS, LEVEL_ERROR, LEVEL_OK, normalize_server_url, relative_time,
-    status_view, summary_lines,
+    CONFIRM_CANCEL, LEVEL_COLORS, LEVEL_ERROR, LEVEL_OK, LOGOUT_CONFIRM_YES, LOGOUT_TITLE,
+    SWITCH_CONFIRM_YES, account_switch_text, logout_blockers_text, logout_intro_text,
+    normalize_server_url, relative_time, status_view, summary_lines,
 )
 
 
@@ -20,6 +21,40 @@ def _center(win, parent, w: int, h: int) -> None:
     x = parent.winfo_rootx() + parent.winfo_width() // 2 - w // 2
     y = parent.winfo_rooty() + parent.winfo_height() // 2 - h // 2
     win.geometry(f"{w}x{h}+{max(x, 0)}+{max(y, 0)}")
+
+
+class ConfirmDialog(ctk.CTkToplevel):
+    """Modal two-button confirmation (Batal / confirm_text). `.confirmed` is set when closed."""
+
+    def __init__(self, parent, title: str, message: str, confirm_text: str,
+                 cancel_text: str = CONFIRM_CANCEL) -> None:
+        super().__init__(parent)
+        self.title(title)
+        self.resizable(False, False)
+        self.confirmed = False
+        ctk.CTkLabel(self, text=message, font=("Segoe UI", 12), wraplength=400,
+                     justify="left", anchor="w").pack(fill="x", padx=20, pady=(18, 8))
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(4, 16))
+        ctk.CTkButton(btns, text=confirm_text, width=110, fg_color="#b91c1c", hover_color="#991b1b",
+                      command=self._yes).pack(side="right")
+        ctk.CTkButton(btns, text=cancel_text, width=80, fg_color="transparent", border_width=1,
+                      text_color=("gray10", "gray90"), command=self.destroy).pack(side="right", padx=(0, 8))
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda _: self.destroy())
+        _center(self, parent, 440, 190 + 16 * message.count("\n"))
+        self.grab_set()
+        self.focus_set()
+
+    def _yes(self) -> None:
+        self.confirmed = True
+        self.destroy()
+
+
+def ask_confirm(parent, title: str, message: str, confirm_text: str) -> bool:
+    dlg = ConfirmDialog(parent, title, message, confirm_text)
+    parent.wait_window(dlg)
+    return dlg.confirmed
 
 
 class LoginDialog(ctk.CTkToplevel):
@@ -34,6 +69,7 @@ class LoginDialog(ctk.CTkToplevel):
         username: str = "",
         notice: str = "",
         on_success=None,
+        has_unsaved_edit=None,
     ) -> None:
         super().__init__(parent)
         self.title("Login Cloud Sync — KangPaket")
@@ -44,6 +80,7 @@ class LoginDialog(ctk.CTkToplevel):
         self._ctl = controller
         self._default_url = default_url
         self._on_success = on_success
+        self._has_unsaved_edit = has_unsaved_edit or (lambda: False)
         self._busy = False
         self._advanced_open = False
 
@@ -155,10 +192,28 @@ class LoginDialog(ctk.CTkToplevel):
             return
         self._show_error("")
         self._set_busy(True)
-        started = self._ctl.login_async(username, password, url, self._login_done)
+        started = self._ctl.login_async(
+            username, password, url, self._login_done, on_switch_required=self._switch_required)
         if not started:
             self._set_busy(False)
             self._show_error("Login sedang berjalan, tunggu sebentar.")
+
+    def _switch_required(self, old_account: str, new_account: str) -> None:
+        """Login is valid but the device holds another account's data: nothing stored yet."""
+        try:
+            if not self.winfo_exists():
+                self._ctl.cancel_switch_async(lambda ok, msg: None)
+                return
+        except Exception:
+            self._ctl.cancel_switch_async(lambda ok, msg: None)
+            return
+        if ask_confirm(self, "Ganti akun Cloud Sync",
+                       account_switch_text(old_account, new_account, self._has_unsaved_edit()),
+                       SWITCH_CONFIRM_YES):
+            self._show_error("")
+            self._ctl.confirm_switch_async(self._login_done)
+        else:
+            self._ctl.cancel_switch_async(self._login_done)
 
     def _login_done(self, ok: bool, message: str) -> None:
         try:
@@ -187,7 +242,8 @@ class LoginDialog(ctk.CTkToplevel):
 class AccountDialog(ctk.CTkToplevel):
     """Account panel shown when logged in (or when the session expired)."""
 
-    def __init__(self, parent, controller: SyncUiController, on_relogin, on_logged_out) -> None:
+    def __init__(self, parent, controller: SyncUiController, on_relogin, on_logged_out,
+                 has_unsaved_edit=None) -> None:
         super().__init__(parent)
         self.title("Akun Cloud Sync — KangPaket")
         self.resizable(False, False)
@@ -197,6 +253,7 @@ class AccountDialog(ctk.CTkToplevel):
         self._ctl = controller
         self._on_relogin = on_relogin
         self._on_logged_out = on_logged_out
+        self._has_unsaved_edit = has_unsaved_edit or (lambda: False)
         self._manual_busy = False
         self._last_manual_error = ""
         self._received_at = time.monotonic()
@@ -316,27 +373,40 @@ class AccountDialog(ctk.CTkToplevel):
         self._on_relogin()
 
     def _logout(self) -> None:
-        user = self._ctl.manager.state.username or "akun ini"
-        if not mb.askyesno(
-            "Logout Cloud Sync",
-            f"Keluar dari akun '{user}'?\n\n"
-            "• Sinkronisasi otomatis berhenti dan sesi di perangkat ini dihapus.\n"
-            "• Profile dan environment di perangkat ini TIDAK dihapus; tetap tersimpan lokal.\n"
-            "• Data di server juga tidak dihapus.\n"
-            "• Perhatian: jika nanti login dengan akun BERBEDA di perangkat ini, data lokal ini "
-            "akan ikut digabung dan diunggah ke akun baru tersebut.\n\n"
-            "Perubahan berikutnya tidak akan disinkronkan sampai Anda login lagi.",
-            parent=self,
-        ):
+        user = self._ctl.manager.state.username or ""
+        if not ask_confirm(self, LOGOUT_TITLE, logout_intro_text(user), "Logout"):
             return
-        self._sync_btn.configure(state="disabled")
-        self._action_msg.configure(text="Logout…", text_color=LEVEL_COLORS["busy"])
-        self._ctl.logout_async(self._logout_done)
+        self._start_logout(force=False)
 
-    def _logout_done(self) -> None:
+    def _start_logout(self, force: bool) -> None:
+        self._sync_btn.configure(state="disabled")
+        self._action_msg.configure(
+            text="Logout…" if force else "Menyinkronkan perubahan terakhir…",
+            text_color=LEVEL_COLORS["busy"])
+        started = self._ctl.logout_async(
+            self._logout_done, unsaved_edit=self._has_unsaved_edit(), force=force)
+        if not started:
+            self._action_msg.configure(text="Logout sedang berjalan.", text_color=LEVEL_COLORS["warn"])
+
+    def _logout_done(self, outcome) -> None:
         try:
-            if self.winfo_exists():
-                self.destroy()
+            if not self.winfo_exists():
+                if outcome.done:
+                    self._on_logged_out()
+                return
         except Exception:
-            pass
-        self._on_logged_out()
+            return
+        if outcome.done:
+            self.destroy()
+            self._on_logged_out()
+            return
+        if outcome.blockers.needs_confirm:
+            if ask_confirm(self, LOGOUT_TITLE, logout_blockers_text(outcome.blockers), LOGOUT_CONFIRM_YES):
+                self._start_logout(force=True)
+                return
+            self._action_msg.configure(
+                text="Logout dibatalkan. Data lokal tidak diubah.", text_color=LEVEL_COLORS["warn"])
+        else:
+            self._action_msg.configure(text=outcome.error or "Logout gagal.",
+                                       text_color=LEVEL_COLORS[LEVEL_ERROR])
+        self.update_status()

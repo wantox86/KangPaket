@@ -554,6 +554,7 @@ class AppWindow:
             self._pm, self._environments, self._sync_state, self._sync_client,
             on_status=lambda st: self._ui(self._on_sync_status, st),
             on_data_changed=lambda res: self._ui(self._on_sync_data_changed, res),
+            on_wiped=lambda: self._ui(self._on_local_data_wiped),
         )
         self._sync_ctl = SyncUiController(self._sync, dispatch=self._ui)
 
@@ -667,6 +668,7 @@ class AppWindow:
                 self._root, self._sync_ctl,
                 on_relogin=self._open_login_relogin,
                 on_logged_out=self._on_logged_out,
+                has_unsaved_edit=self._has_unsaved_edit,
             )
             self._sync_dialog = dlg
             dlg.bind("<Destroy>", lambda e, d=dlg: self._sync_dialog_closed(d, e), add="+")
@@ -684,6 +686,7 @@ class AppWindow:
             default_url=self._default_sync_url(),
             current_url=self._sync_state.server_url or self._sync_client.base_url,
             username=username, notice=notice,
+            has_unsaved_edit=self._has_unsaved_edit,
             on_success=lambda: self._status_bar.set_text(
                 "Login berhasil. Menyinkronkan data pertama kali…"),
         )
@@ -694,9 +697,25 @@ class AppWindow:
             notice="Sesi berakhir. Masukkan password untuk login ulang.",
         )
 
+    def _has_unsaved_edit(self) -> bool:
+        return self._request_panel.is_dirty
+
+    def _on_local_data_wiped(self) -> None:
+        """All profiles/environments were cleared (logout or account switch): reset the UI."""
+        if self._env_dialog is not None:
+            try:
+                self._env_dialog.destroy()   # no commit: its editor would write stale values back
+            except tk.TclError:
+                pass
+            self._env_dialog = None
+        self._new_request()                  # also drops unsaved edits (the user confirmed)
+        self._sidebar.refresh(keep_selection=False)
+        self._refresh_env_menu()
+
     def _on_logged_out(self) -> None:
         self._render_sync_status()
-        self._status_bar.set_text("Logout Cloud Sync. Data lokal tetap ada.")
+        self._status_bar.set_text(
+            "Logout Cloud Sync. Profile dan environment dihapus dari perangkat ini (data tetap di server).")
 
     def _on_close(self) -> None:
         """Stop the sync runner (briefly) and close; never hangs on an in-flight request."""
