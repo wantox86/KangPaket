@@ -104,6 +104,18 @@ case "$PLATFORM" in
             --icon "$ICON_MAC" \
             --osx-bundle-identifier "com.internal.kangpaket" \
             "$ENTRY"
+
+        # PyInstaller writes CFBundleShortVersionString=0.0.0 (and no CFBundleVersion), which is
+        # what the macOS app menu's "About" shows. Stamp the real version from app/version.py
+        # (single source of truth), then re-sign ad-hoc: editing Info.plist breaks the signature.
+        APP_VERSION="$($PYTHON -c 'from app.version import __version__; print(__version__)')"
+        PLIST="dist/$APP_NAME.app/Contents/Info.plist"
+        for key in CFBundleShortVersionString CFBundleVersion; do
+            /usr/libexec/PlistBuddy -c "Set :$key $APP_VERSION" "$PLIST" 2>/dev/null \
+                || /usr/libexec/PlistBuddy -c "Add :$key string $APP_VERSION" "$PLIST"
+        done
+        codesign --force --deep --sign - "dist/$APP_NAME.app" &>/dev/null
+        echo "   Info.plist version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
         echo "✅ Build complete: dist/$APP_NAME.app  (single self-contained .app)"
         ;;
 

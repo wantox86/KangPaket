@@ -211,6 +211,12 @@ class AppWindow:
 
         self._root.configure(menu=menubar)
 
+        # macOS: the native "KangPaket > About KangPaket" item runs the stock Tk panel, which
+        # reads the version from the bundle's Info.plist (and shows nothing useful when run
+        # from source). Route it to our own dialog so it always shows app/version.py.
+        if self._root.tk.call("tk", "windowingsystem") == "aqua":
+            self._root.createcommand("tk::mac::standardAboutPanel", self._about)
+
     def _bind_shortcuts(self) -> None:
         self._root.bind("<Control-n>",      lambda _: self._new_request())
         self._root.bind("<Control-s>",      lambda _: self._save_current())
