@@ -33,7 +33,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.update_idletasks()
         pw = parent.winfo_rootx() + parent.winfo_width() // 2 - 280
         ph = parent.winfo_rooty() + parent.winfo_height() // 2 - 320
-        self.geometry(f"560x640+{pw}+{ph}")
+        self.geometry(f"620x640+{pw}+{ph}")
 
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.bind("<Escape>", lambda _: self._cancel())
@@ -144,7 +144,7 @@ class SettingsDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             row, text=label, font=("Segoe UI", 12),
-            width=200, anchor="w",
+            width=170, anchor="w",
         ).pack(side="left")
 
         if widget == "check":

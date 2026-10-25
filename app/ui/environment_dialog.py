@@ -48,13 +48,17 @@ class EnvironmentDialog(ctk.CTkToplevel):
 
         btns = ctk.CTkFrame(left, fg_color="transparent")
         btns.pack(fill="x", padx=4, pady=(0, 6))
-        for text, cmd in (
+        # 2x2 grid with equal, stretchy columns: 4 buttons in one row of a 220px
+        # sidebar cut off "Duplicate"/"Delete". No fixed width, so the buttons
+        # follow font size / DPI instead of clipping.
+        btns.grid_columnconfigure((0, 1), weight=1, uniform="envbtn")
+        for i, (text, cmd) in enumerate((
             ("Add", self._add), ("Rename", self._rename),
             ("Duplicate", self._duplicate), ("Delete", self._delete),
-        ):
+        )):
             ctk.CTkButton(
-                btns, text=text, width=48, height=26, font=("Segoe UI", 11), command=cmd,
-            ).pack(side="left", expand=True, fill="x", padx=1)
+                btns, text=text, width=0, height=26, font=("Segoe UI", 11), command=cmd,
+            ).grid(row=i // 2, column=i % 2, sticky="ew", padx=1, pady=1)
 
         right = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True, padx=8, pady=8)
