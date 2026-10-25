@@ -14,6 +14,13 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
+_KNOWN_KEYS = frozenset({
+    "id", "name", "collection", "method", "url", "headers", "params", "body_type",
+    "body_content", "body_form", "auth_type", "auth_data", "assertions", "timeout",
+    "follow_redirects", "verify_ssl", "created_at", "updated_at",
+})
+
+
 @dataclass
 class RequestProfile:
     name: str
@@ -42,9 +49,11 @@ class RequestProfile:
     id: str = field(default_factory=_new_uuid)
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
+    extra: dict = field(default_factory=dict)   # unknown keys, kept so newer-version data survives a round trip
 
     def to_dict(self) -> dict:
         return {
+            **self.extra,
             "id": self.id,
             "name": self.name,
             "collection": self.collection,
@@ -68,6 +77,7 @@ class RequestProfile:
     @classmethod
     def from_dict(cls, data: dict) -> "RequestProfile":
         return cls(
+            extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
             id=data.get("id", _new_uuid()),
             name=data.get("name", "Untitled"),
             collection=data.get("collection", "Default"),
