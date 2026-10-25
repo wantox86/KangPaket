@@ -207,9 +207,10 @@ class AssertionEditor(ctk.CTkFrame):
         self._on_change = on_change or (lambda: None)
         self._rows: list[_AssertionRow] = []
 
+        # Footer first (side="bottom") so a short parent can't squeeze it away.
         self._build_header()
-        self._build_scroll_area()
         self._build_footer()
+        self._build_scroll_area()
 
     # ------------------------------------------------------------------
     # Public API
@@ -250,18 +251,18 @@ class AssertionEditor(ctk.CTkFrame):
 
     def _build_scroll_area(self) -> None:
         self._scroll = ctk.CTkScrollableFrame(
-            self, corner_radius=0, fg_color="transparent", height=160
+            self, corner_radius=0, fg_color="transparent", height=60
         )
         self._scroll.pack(fill="both", expand=True, pady=(2, 0))
 
     def _build_footer(self) -> None:
         footer = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        footer.pack(fill="x", pady=(4, 0))
+        footer.pack(side="bottom", fill="x", pady=(4, 0))
 
         ctk.CTkButton(
             footer,
             text="+ Add Assertion",
-            width=120,
+            width=0,
             height=26,
             font=(FONT_UI, 11),
             fg_color="#2a2a2a",

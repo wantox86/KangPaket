@@ -72,7 +72,7 @@ class VariableEditor(ctk.CTkFrame):
         self._loading = False
 
         ctk.CTkButton(
-            self, text="+ Add Variable", width=110, height=26, font=("Segoe UI", 11),
+            self, text="+ Add Variable", width=0, height=26, font=("Segoe UI", 11),
             fg_color="#2a2a2a", hover_color="#3a3a3a", command=self._add_blank,
         ).pack(side="bottom", anchor="w", pady=(4, 0))
         self._scroll = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")

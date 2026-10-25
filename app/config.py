@@ -3,7 +3,7 @@ KangPaket — App-wide constants and configuration.
 """
 
 APP_NAME = "KangPaket"
-APP_VERSION = "1.0.2"
+from app.version import __version__ as APP_VERSION  # noqa: E402  (single source: app/version.py)
 APP_TITLE = "KangPaket"
 USER_AGENT = "KangPaket/1.0"
 
