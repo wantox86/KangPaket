@@ -184,6 +184,7 @@ class AppWindow:
         file_menu.add_command(label="Import Profiles…", command=self._import_profiles)
         file_menu.add_separator()
         file_menu.add_command(label="Import from Postman…", command=self._import_postman)
+        file_menu.add_command(label="Import from cURL…", command=self._import_curl)
         file_menu.add_separator()
         file_menu.add_command(label="Settings", command=self._open_settings, accelerator="Ctrl+,")
         file_menu.add_separator()
@@ -382,6 +383,35 @@ class AppWindow:
             on_import_done=lambda count, col: self._on_postman_import_done(count, col, result),
         )
         self._root.wait_window(dialog)
+
+    def _import_curl(self) -> None:
+        from app.ui.curl_import_dialog import CurlImportDialog
+
+        default_col = self._settings.get("default_collection", "Default")
+        dialog = CurlImportDialog(
+            self._root,
+            collections=self._pm.get_collections(),
+            default_collection=default_col,
+        )
+        self._root.wait_window(dialog)
+        if dialog.result is None:
+            return
+
+        profile = dialog.result.profile
+        profile.collection = dialog.collection
+        try:
+            self._pm.save_profile(profile)
+        except RuntimeError as e:
+            mb.showerror("Import Failed", str(e))
+            return
+        self._sidebar.refresh(keep_selection=False)
+        self._on_profile_select(profile)
+        self._sidebar.select_profile(profile.id)
+        msg = f"Imported from cURL into '{profile.collection}': {profile.name}"
+        if dialog.result.warnings:
+            msg += f" ({len(dialog.result.warnings)} note(s))"
+            mb.showinfo("cURL import notes", "\n".join(f"- {w}" for w in dialog.result.warnings))
+        self._status_bar.set_text(msg)
 
     def _on_postman_import_done(self, count: int, collection: str, result=None) -> None:
         self._sidebar.refresh()
@@ -850,4 +880,4 @@ class _AboutDialog(ctk.CTkToplevel):
         self.update_idletasks()
         pw = parent.winfo_rootx() + parent.winfo_width() // 2 - 175
         ph = parent.winfo_rooty() + parent.winfo_height() // 2 - 180
-        self.geometry(f"350x360+{pw}+{ph}")
+        self.geometry(f"{max(350, self.winfo_reqwidth())}x{self.winfo_reqheight()}+{pw}+{ph}")

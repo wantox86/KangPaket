@@ -10,6 +10,7 @@
 - Save and manage request profiles organized by collection
 - Collection Runner: sequential / parallel execution with per-request assertions and CSV variable support
 - Import from Postman Collection v2.0 & v2.1
+- Import from cURL (File > Import from cURL…): paste a command, it is parsed (never executed) into a new request
 - Export / import profiles across machines
 - Dark / light theme, configurable font size, proxy support
 
