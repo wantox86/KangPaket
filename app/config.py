@@ -75,8 +75,37 @@ SIDEBAR_WIDTH = 220
 
 # Data directories
 import os
+import sys
+
 BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR      = os.path.join(BASE_DIR, "data")
+
+
+def _user_data_dir() -> str:
+    """Per-user, writable, persistent data dir used by frozen (PyInstaller) builds.
+
+    In a --onefile build BASE_DIR is the temp extraction dir (sys._MEIPASS), which is
+    deleted when the app exits - anything written under it (profiles, settings,
+    sync_state.json = the Cloud Sync login) would be lost on every close.
+    """
+    if sys.platform == "darwin":
+        root = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    elif sys.platform.startswith("win"):
+        root = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+    else:
+        root = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(root, APP_NAME)
+
+
+def _resolve_data_dir() -> str:
+    override = os.environ.get("KANGPAKET_DATA_DIR")      # explicit override (portable installs, tests)
+    if override:
+        return os.path.abspath(override)
+    if getattr(sys, "frozen", False):
+        return _user_data_dir()
+    return os.path.join(BASE_DIR, "data")                # running from source: repo-local ./data
+
+
+DATA_DIR      = _resolve_data_dir()
 PROFILES_DIR  = os.path.join(DATA_DIR, "profiles")
 RESULTS_DIR   = os.path.join(DATA_DIR, "runner_results")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")

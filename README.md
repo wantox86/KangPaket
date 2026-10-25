@@ -82,6 +82,8 @@ KangPaket can sync your profiles and environments across devices through a KangP
 
 ## Data Storage
 
+When running from source, data lives in `./data/`. In packaged builds (PyInstaller) it lives in a per-user folder that survives restarts and updates: macOS `~/Library/Application Support/KangPaket/`, Windows `%APPDATA%\KangPaket\`, Linux `~/.local/share/KangPaket/` (override with the `KANGPAKET_DATA_DIR` environment variable). Paths below are relative to that folder.
+
 Profiles are saved to `data/profiles/<uuid>.json`.
 Global settings are stored in `data/settings.json`.
 Runner results are saved to `data/runner_results/`.
