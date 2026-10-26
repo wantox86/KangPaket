@@ -3,14 +3,25 @@ KangPaket — Main application window (Sprint 4: full profile integration).
 """
 from __future__ import annotations
 
+import time
 import tkinter as tk
 import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 import customtkinter as ctk
 
 from app.config import APP_TITLE, ASSETS_DIR
+from app.core.environment_manager import EnvironmentManager
 from app.core.profile_manager import ProfileManager
+from app.models.environment_model import Environment
 from app.core.settings_manager import SettingsManager
+from app.core.sync_client import SyncClient, resolve_server_url
+from app.core.sync_controller import SyncUiController
+from app.core.sync_manager import SyncManager, SyncPhase, SyncResult, SyncStatus
+from app.core.sync_presenter import (
+    ACTION_CLOSE, ACTION_RELOAD, ACTION_WARN_CHANGED, ACTION_WARN_DELETED,
+    LEVEL_COLORS, decide_open_profile_action, status_view,
+)
+from app.core.sync_state import SyncState
 from app.models.request_model import RequestProfile
 from app.models.response_model import ResponseResult
 from app.ui.sidebar import Sidebar
@@ -23,6 +34,7 @@ class AppWindow:
     def __init__(self, settings: SettingsManager) -> None:
         self._settings = settings
         self._pm       = ProfileManager()
+        self._environments = EnvironmentManager()
 
         theme = settings.get("theme", "dark")
         ctk.set_appearance_mode(theme)
@@ -34,9 +46,17 @@ class AppWindow:
         self._root.minsize(900, 600)
         self._set_window_icon()
 
+        self._env_dialog = None
+        self._sync_dialog = None
+        self._closing = False
+        self._sync_status_at = time.monotonic()
+        self._init_sync()
+
         self._build_layout()
         self._build_menu()
         self._bind_shortcuts()
+        self._start_sync()
+        self._root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ------------------------------------------------------------------
     # Window icon
@@ -67,6 +87,30 @@ class AppWindow:
         # Status bar (bottom)
         self._status_bar = StatusBar(self._root)
         self._status_bar.pack(side="bottom", fill="x")
+
+        # Environment selector (top bar)
+        topbar = ctk.CTkFrame(self._root, height=32, corner_radius=0)
+        topbar.pack(side="top", fill="x")
+        self._env_menu = ctk.CTkOptionMenu(
+            topbar, values=["No Environment"], width=200, height=24,
+            font=("Segoe UI", 12), command=self._on_env_selected,
+        )
+        self._env_menu.pack(side="right", padx=8, pady=4)
+        ctk.CTkLabel(topbar, text="Environment:", font=("Segoe UI", 12)).pack(
+            side="right", pady=4
+        )
+        self._environments.on_change(self._refresh_env_menu)
+        self._refresh_env_menu()
+
+        # Cloud Sync account entry (left side of the top bar)
+        self._sync_btn = ctk.CTkButton(
+            topbar, text="☁  Belum login", height=24, width=160, anchor="w",
+            font=("Segoe UI", 12), fg_color="transparent", hover_color=("gray85", "gray25"),
+            text_color=LEVEL_COLORS["muted"], command=self._open_account,
+        )
+        self._sync_btn.pack(side="left", padx=8, pady=4)
+        self._render_sync_status()
+        self._root.after(15000, self._tick_sync_label)
 
         # Main 3-panel container
         main = ctk.CTkFrame(self._root, corner_radius=0, fg_color="transparent")
@@ -105,6 +149,7 @@ class AppWindow:
         self._request_panel = RequestPanel(
             self._paned,
             settings=self._settings,
+            environments=self._environments,
             on_response=self._on_response,
             on_status=self._status_bar.set_text,
             on_save=self._open_save_dialog,
@@ -139,15 +184,18 @@ class AppWindow:
         file_menu.add_command(label="Import Profiles…", command=self._import_profiles)
         file_menu.add_separator()
         file_menu.add_command(label="Import from Postman…", command=self._import_postman)
+        file_menu.add_command(label="Import from cURL…", command=self._import_curl)
         file_menu.add_separator()
         file_menu.add_command(label="Settings", command=self._open_settings, accelerator="Ctrl+,")
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self._root.quit)
+        file_menu.add_command(label="Exit", command=self._on_close)
         menubar.add_cascade(label="File", menu=file_menu)
 
         # --- Tools ---
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Collection Runner", command=self._open_runner)
+        tools_menu.add_command(label="Environments…", command=self._open_environments)
+        tools_menu.add_command(label="Akun Cloud Sync…", command=self._open_account)
         tools_menu.add_separator()
         tools_menu.add_command(
             label="Clear Response", command=self._clear_response, accelerator="Ctrl+L"
@@ -162,6 +210,12 @@ class AppWindow:
         menubar.add_cascade(label="Help", menu=help_menu)
 
         self._root.configure(menu=menubar)
+
+        # macOS: the native "KangPaket > About KangPaket" item runs the stock Tk panel, which
+        # reads the version from the bundle's Info.plist (and shows nothing useful when run
+        # from source). Route it to our own dialog so it always shows app/version.py.
+        if self._root.tk.call("tk", "windowingsystem") == "aqua":
+            self._root.createcommand("tk::mac::standardAboutPanel", self._about)
 
     def _bind_shortcuts(self) -> None:
         self._root.bind("<Control-n>",      lambda _: self._new_request())
@@ -247,6 +301,7 @@ class AppWindow:
 
         self._pm.save_profile(profile)
         self._request_panel._current_profile_id = profile.id
+        self._request_panel.loaded_updated_at = profile.updated_at
         self._request_panel._clear_dirty()
         self._request_panel._delete_btn.configure(state="normal")
         self._sidebar.refresh(keep_selection=True)
@@ -292,15 +347,20 @@ class AppWindow:
 
     def _import_postman(self) -> None:
         from app.core.postman_importer import (
-            parse_postman_file, get_file_size_mb, PostmanImportError
+            parse_postman_file, get_file_size_mb, is_postman_environment_file,
+            PostmanImportError,
         )
         from app.ui.postman_import_dialog import PostmanImportDialog
 
         path = fd.askopenfilename(
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Select Postman Collection",
+            title="Select Postman Collection or Environment",
         )
         if not path:
+            return
+
+        if is_postman_environment_file(path):
+            self._import_postman_environment(path)
             return
 
         # Warn for large files
@@ -326,16 +386,68 @@ class AppWindow:
             file_path=path,
             result=result,
             profile_manager=self._pm,
-            on_import_done=self._on_postman_import_done,
+            on_import_done=lambda count, col: self._on_postman_import_done(count, col, result),
         )
         self._root.wait_window(dialog)
 
-    def _on_postman_import_done(self, count: int, collection: str) -> None:
+    def _import_curl(self) -> None:
+        from app.ui.curl_import_dialog import CurlImportDialog
+
+        default_col = self._settings.get("default_collection", "Default")
+        dialog = CurlImportDialog(
+            self._root,
+            collections=self._pm.get_collections(),
+            default_collection=default_col,
+        )
+        self._root.wait_window(dialog)
+        if dialog.result is None:
+            return
+
+        profile = dialog.result.profile
+        profile.collection = dialog.collection
+        try:
+            self._pm.save_profile(profile)
+        except RuntimeError as e:
+            mb.showerror("Import Failed", str(e))
+            return
+        self._sidebar.refresh(keep_selection=False)
+        self._on_profile_select(profile)
+        self._sidebar.select_profile(profile.id)
+        msg = f"Imported from cURL into '{profile.collection}': {profile.name}"
+        if dialog.result.warnings:
+            msg += f" ({len(dialog.result.warnings)} note(s))"
+            mb.showinfo("cURL import notes", "\n".join(f"- {w}" for w in dialog.result.warnings))
+        self._status_bar.set_text(msg)
+
+    def _on_postman_import_done(self, count: int, collection: str, result=None) -> None:
         self._sidebar.refresh()
         if count == 0:
             self._status_bar.set_text("0 requests imported — all items could not be converted.")
-        else:
-            self._status_bar.set_text(f"✅ {count} request(s) imported to '{collection}'")
+            return
+        msg = f"✅ {count} request(s) imported to '{collection}'"
+        if result is not None and result.variables:
+            env = self._add_environment(result.collection_name, result.variables)
+            msg += f"; environment '{env.name}' created and activated"
+        self._status_bar.set_text(msg)
+
+    def _import_postman_environment(self, path: str) -> None:
+        from app.core.postman_importer import parse_postman_environment, PostmanImportError
+        try:
+            env = parse_postman_environment(path)
+        except PostmanImportError as e:
+            mb.showerror("Import Failed", str(e))
+            return
+        env = self._add_environment(env.name, env.vars)
+        self._status_bar.set_text(
+            f"✅ Environment '{env.name}' imported ({len(env.vars)} variable(s)) and activated"
+        )
+
+    def _add_environment(self, name: str, variables) -> Environment:
+        env = self._environments.add(
+            Environment(self._environments.unique_name(name), list(variables))
+        )
+        self._environments.set_active(env.id)
+        return env
 
     # ------------------------------------------------------------------
     # Response helpers
@@ -427,10 +539,32 @@ class AppWindow:
             self._root,
             profile_manager=self._pm,
             settings=self._settings,
+            environments=self._environments,
             on_open_profile=self._on_profile_select,
             preselect_collection=preselect_collection,
         )
         self._root.wait_window(win)
+
+    def _open_environments(self) -> None:
+        from app.ui.environment_dialog import EnvironmentDialog
+        dlg = EnvironmentDialog(self._root, self._environments)
+        self._env_dialog = dlg
+        dlg.bind("<Destroy>", lambda e, d=dlg: self._env_dialog_closed(d, e), add="+")
+
+    def _env_dialog_closed(self, dlg, event) -> None:
+        if event.widget is dlg and self._env_dialog is dlg:
+            self._env_dialog = None
+
+    def _refresh_env_menu(self) -> None:
+        names = ["No Environment"] + [e.name for e in self._environments.envs]
+        active = self._environments.active
+        self._env_menu.configure(values=names)
+        self._env_menu.set(active.name if active else "No Environment")
+
+    def _on_env_selected(self, name: str) -> None:
+        env = next((e for e in self._environments.envs if e.name == name), None)
+        self._environments.set_active(env.id if env else None)
+        self._status_bar.set_text(f"Environment: {name}")
 
     def _about(self) -> None:
         _AboutDialog(self._root)
@@ -441,6 +575,197 @@ class AppWindow:
 
     def run(self) -> None:
         self._root.mainloop()
+
+    # ------------------------------------------------------------------
+    # Cloud Sync
+    # ------------------------------------------------------------------
+
+    def _init_sync(self) -> None:
+        """Create state/client/manager once. Callbacks come from the runner thread -> marshalled."""
+        self._sync_state = SyncState()
+        self._sync_client = SyncClient(
+            self._sync_state, resolve_server_url(self._settings, self._sync_state)
+        )
+        self._sync = SyncManager(
+            self._pm, self._environments, self._sync_state, self._sync_client,
+            on_status=lambda st: self._ui(self._on_sync_status, st),
+            on_data_changed=lambda res: self._ui(self._on_sync_data_changed, res),
+            on_wiped=lambda: self._ui(self._on_local_data_wiped),
+        )
+        self._sync_ctl = SyncUiController(self._sync, dispatch=self._ui)
+
+    def _start_sync(self) -> None:
+        self._sync.attach()
+        self._sync.start()
+
+    def _ui(self, fn, *args) -> None:
+        """Run fn(*args) on the UI thread; safe to call from any thread, even while closing."""
+        if self._closing:
+            return
+
+        def run() -> None:
+            if self._closing:
+                return
+            try:
+                fn(*args)
+            except tk.TclError:
+                pass   # widget destroyed meanwhile
+            except Exception as e:
+                print(f"[AppWindow] UI callback failed: {e}")
+
+        try:
+            self._root.after(0, run)
+        except (tk.TclError, RuntimeError):
+            pass   # window gone / mainloop not running
+
+    def _default_sync_url(self) -> str:
+        return resolve_server_url(self._settings, None)
+
+    def _render_sync_status(self) -> None:
+        view = status_view(
+            self._sync.status, int(time.time() * 1000), time.monotonic() - self._sync_status_at
+        )
+        self._sync_btn.configure(text=f"☁  {view.text}", text_color=LEVEL_COLORS[view.level])
+
+    def _tick_sync_label(self) -> None:
+        if self._closing:
+            return
+        try:
+            self._render_sync_status()
+            if self._sync_dialog is not None:
+                self._sync_dialog.update_status()
+            self._root.after(15000, self._tick_sync_label)
+        except tk.TclError:
+            pass
+
+    def _on_sync_status(self, status: SyncStatus) -> None:
+        self._sync_status_at = time.monotonic()
+        self._render_sync_status()
+        dlg = self._sync_dialog
+        if dlg is not None:
+            dlg.note_status_received()
+            dlg.update_status()
+
+    def _on_sync_data_changed(self, result: SyncResult) -> None:
+        """Server data was merged into local storage: refresh everything that shows it."""
+        self._sidebar.refresh()
+        self._refresh_env_menu()
+        if self._env_dialog is not None:
+            try:
+                self._env_dialog.reload_from_manager()
+            except tk.TclError:
+                pass
+        self._status_bar.set_text(
+            f"Cloud Sync: {result.applied_local} diperbarui, {result.deleted_local} dihapus dari server."
+        )
+        self._reconcile_open_profile()   # may override the status text with a warning
+
+    def _reconcile_open_profile(self) -> None:
+        """Safe, simple policy for the profile open in the request panel after a pull."""
+        rp = self._request_panel
+        pid = rp._current_profile_id
+        if not pid:
+            return
+        disk = self._pm.get_profile(pid)
+        action = decide_open_profile_action(
+            rp.loaded_updated_at, disk.updated_at if disk else None, disk is not None, rp.is_dirty
+        )
+        if action == ACTION_RELOAD and disk is not None:
+            rp.load_profile(disk, is_saved=True)
+            self._status_bar.set_text(f"Cloud Sync: '{disk.name}' diperbarui dari server.")
+        elif action == ACTION_CLOSE:
+            self._new_request()
+            self._status_bar.set_text("Cloud Sync: request yang dibuka dihapus dari server.")
+        elif action == ACTION_WARN_CHANGED:
+            rp.loaded_updated_at = disk.updated_at if disk else rp.loaded_updated_at
+            self._status_bar.set_error(
+                "Cloud Sync: profile yang sedang diedit berubah di server. Edit Anda tidak ditimpa; "
+                "menyimpan akan menggantikan versi server."
+            )
+        elif action == ACTION_WARN_DELETED:
+            rp.loaded_updated_at = None
+            self._status_bar.set_error(
+                "Cloud Sync: profile yang sedang diedit dihapus di server. Edit Anda masih ada; "
+                "simpan untuk membuatnya lagi."
+            )
+
+    def _open_account(self) -> None:
+        from app.ui.sync_dialogs import AccountDialog
+        if self._sync_dialog is not None:
+            try:
+                if self._sync_dialog.winfo_exists():
+                    self._sync_dialog.focus_set()
+                    return
+            except tk.TclError:
+                pass
+            self._sync_dialog = None
+        if self._sync.logged_in or self._sync.status.phase == SyncPhase.AUTH_REQUIRED:
+            dlg = AccountDialog(
+                self._root, self._sync_ctl,
+                on_relogin=self._open_login_relogin,
+                on_logged_out=self._on_logged_out,
+                has_unsaved_edit=self._has_unsaved_edit,
+            )
+            self._sync_dialog = dlg
+            dlg.bind("<Destroy>", lambda e, d=dlg: self._sync_dialog_closed(d, e), add="+")
+        else:
+            self._open_login()
+
+    def _sync_dialog_closed(self, dlg, event) -> None:
+        if event.widget is dlg and self._sync_dialog is dlg:
+            self._sync_dialog = None
+
+    def _open_login(self, username: str = "", notice: str = "") -> None:
+        from app.ui.sync_dialogs import LoginDialog
+        LoginDialog(
+            self._root, self._sync_ctl,
+            default_url=self._default_sync_url(),
+            current_url=self._sync_state.server_url or self._sync_client.base_url,
+            username=username, notice=notice,
+            has_unsaved_edit=self._has_unsaved_edit,
+            on_success=lambda: self._status_bar.set_text(
+                "Login berhasil. Menyinkronkan data pertama kali…"),
+        )
+
+    def _open_login_relogin(self) -> None:
+        self._open_login(
+            username=self._sync_state.username,
+            notice="Sesi berakhir. Masukkan password untuk login ulang.",
+        )
+
+    def _has_unsaved_edit(self) -> bool:
+        return self._request_panel.is_dirty
+
+    def _on_local_data_wiped(self) -> None:
+        """All profiles/environments were cleared (logout or account switch): reset the UI."""
+        if self._env_dialog is not None:
+            try:
+                self._env_dialog.destroy()   # no commit: its editor would write stale values back
+            except tk.TclError:
+                pass
+            self._env_dialog = None
+        self._new_request()                  # also drops unsaved edits (the user confirmed)
+        self._sidebar.refresh(keep_selection=False)
+        self._refresh_env_menu()
+
+    def _on_logged_out(self) -> None:
+        self._render_sync_status()
+        self._status_bar.set_text(
+            "Logout Cloud Sync. Profile dan environment dihapus dari perangkat ini (data tetap di server).")
+
+    def _on_close(self) -> None:
+        """Stop the sync runner (briefly) and close; never hangs on an in-flight request."""
+        if self._closing:
+            return
+        self._closing = True
+        try:
+            self._sync.stop(timeout=1.5)
+        except Exception as e:
+            print(f"[AppWindow] sync stop failed: {e}")
+        try:
+            self._root.destroy()
+        except tk.TclError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -561,4 +886,4 @@ class _AboutDialog(ctk.CTkToplevel):
         self.update_idletasks()
         pw = parent.winfo_rootx() + parent.winfo_width() // 2 - 175
         ph = parent.winfo_rooty() + parent.winfo_height() // 2 - 180
-        self.geometry(f"350x360+{pw}+{ph}")
+        self.geometry(f"{max(350, self.winfo_reqwidth())}x{self.winfo_reqheight()}+{pw}+{ph}")

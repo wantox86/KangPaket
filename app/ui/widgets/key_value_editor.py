@@ -134,9 +134,12 @@ class KeyValueEditor(ctk.CTkFrame):
         self._on_change    = on_change or (lambda: None)
         self._rows: list[_Row] = []
 
+        # Footer is packed BEFORE the expanding scroll area (side="bottom") so the
+        # "+ Add Row" button always keeps its space; otherwise a short parent
+        # squeezes the last-packed footer down to 1px and the button vanishes.
         self._build_header(columns or ["Key", "Value"])
-        self._build_scroll_area()
         self._build_footer()
+        self._build_scroll_area()
 
     # ------------------------------------------------------------------
     # Public API
@@ -193,18 +196,18 @@ class KeyValueEditor(ctk.CTkFrame):
             self,
             corner_radius=0,
             fg_color="transparent",
-            height=160,
+            height=60,
         )
         self._scroll.pack(fill="both", expand=True, pady=(2, 0))
 
     def _build_footer(self) -> None:
         footer = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        footer.pack(fill="x", pady=(4, 0))
+        footer.pack(side="bottom", fill="x", pady=(4, 0))
 
         ctk.CTkButton(
             footer,
             text="+ Add Row",
-            width=90,
+            width=0,
             height=26,
             font=("Segoe UI", 11),
             fg_color="#2a2a2a",

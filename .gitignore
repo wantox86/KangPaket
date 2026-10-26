@@ -68,6 +68,8 @@ coverage.xml
 data/profiles/*.json
 data/runner_results/*.json
 data/settings.json
+data/environments.json
+data/sync_state.json
 
 # Keep placeholder files
 !data/profiles/.gitkeep

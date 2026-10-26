@@ -11,6 +11,7 @@ import customtkinter as ctk
 from app.config import (
     HTTP_METHODS, METHOD_COLORS, FONT_MONO, RAW_CONTENT_TYPES,
 )
+from app.core.environment_manager import EnvironmentManager
 from app.core.http_client import HttpClient
 from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
@@ -24,6 +25,7 @@ class RequestPanel(ctk.CTkFrame):
         self,
         parent,
         settings: SettingsManager,
+        environments: EnvironmentManager,
         on_response=None,
         on_status=None,
         on_save=None,
@@ -32,6 +34,7 @@ class RequestPanel(ctk.CTkFrame):
     ):
         super().__init__(parent, corner_radius=0, **kwargs)
         self._settings     = settings
+        self._environments = environments
         self._on_response  = on_response   # callback(ResponseResult)
         self._on_status    = on_status     # callback(str)
         self._on_save      = on_save       # callback(RequestProfile) → opens ProfileDialog
@@ -40,6 +43,9 @@ class RequestPanel(ctk.CTkFrame):
         self._sending      = False
         self._current_profile_id: str | None = None  # ID profil yang sedang dibuka
         self._is_dirty     = False          # unsaved changes flag
+        # updated_at of the saved profile as loaded/saved here (None = nothing saved is open);
+        # Cloud Sync uses it to detect that the open profile changed on disk.
+        self.loaded_updated_at: str | None = None
 
         self._build_url_bar()
         self._build_tabs()
@@ -486,6 +492,7 @@ class RequestPanel(ctk.CTkFrame):
 
     def load_profile(self, profile: RequestProfile, is_saved: bool = False) -> None:
         self._current_profile_id = profile.id
+        self.loaded_updated_at = profile.updated_at if is_saved else None
         # Enable delete only for profiles that exist on disk
         self._delete_btn.configure(state="normal" if is_saved else "disabled")
         self._method_var.set(profile.method)
@@ -619,10 +626,11 @@ class RequestPanel(ctk.CTkFrame):
         proxy_enabled   = self._settings.get("proxy_enabled", False)
         proxy_http      = self._settings.get("proxy_http", "")
         proxy_https     = self._settings.get("proxy_https", "")
+        layers          = self._environments.layers()
 
         threading.Thread(
             target=self._do_send,
-            args=(profile, timeout, proxy_enabled, proxy_http, proxy_https),
+            args=(profile, timeout, proxy_enabled, proxy_http, proxy_https, layers),
             daemon=True,
         ).start()
 
@@ -633,6 +641,7 @@ class RequestPanel(ctk.CTkFrame):
         proxy_enabled: bool = False,
         proxy_http: str = "",
         proxy_https: str = "",
+        layers: list[dict[str, str]] | None = None,
     ) -> None:
         result = self._http_client.send(
             profile,
@@ -640,6 +649,7 @@ class RequestPanel(ctk.CTkFrame):
             proxy_enabled=proxy_enabled,
             proxy_http=proxy_http,
             proxy_https=proxy_https,
+            variables=layers,
         )
         self.after(0, self._on_send_done, result)
 
@@ -695,9 +705,14 @@ class RequestPanel(ctk.CTkFrame):
         self._is_dirty = False
         self._save_btn.configure(text="Save")
 
+    @property
+    def is_dirty(self) -> bool:
+        return self._is_dirty
+
     def clear_profile(self) -> None:
         """Reset panel to empty state (called after profile deletion)."""
         self._current_profile_id = None
+        self.loaded_updated_at = None
         self._delete_btn.configure(state="disabled")
 
     # ------------------------------------------------------------------

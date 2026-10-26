@@ -6,16 +6,16 @@ evaluates assertions, and emits thread-safe UI callbacks.
 """
 from __future__ import annotations
 
-import copy
 import json
-import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
+from app.core.environment_manager import EnvironmentManager
 from app.core.http_client import HttpClient
 from app.core.settings_manager import SettingsManager
+from app.core.variable_resolver import resolve_profile
 from app.models.request_model import RequestProfile
 from app.models.response_model import ResponseResult
 from app.models.runner_model import RunnerConfig, RunItemResult, RunnerResult
@@ -139,9 +139,12 @@ class RunnerEngine:
         http_client: HttpClient,
         settings: SettingsManager,
         tk_root=None,
+        environments: EnvironmentManager | None = None,
     ) -> None:
         self._client   = http_client
         self._settings = settings
+        self._environments = environments
+        self._env_layers: list[dict[str, str]] = []
         self._root     = tk_root
         self._stop_flag = threading.Event()
 
@@ -162,9 +165,12 @@ class RunnerEngine:
 
         csv_data: optional list of variable dicts (one per row).  When provided
         the runner uses len(csv_data) as the iteration count and substitutes
-        {{VariableName}} placeholders in every profile field for each row.
+        {{VariableName}} placeholders in every profile field for each row
+        (CSV values take priority over the active environment).
         """
         self._stop_flag.clear()
+        # Snapshot on the caller (UI) thread so edits mid-run do not leak in.
+        self._env_layers = self._environments.layers() if self._environments else []
         thread = threading.Thread(
             target=self._run_thread,
             args=(config, profiles, on_item_done, on_progress, on_finished, csv_data),
@@ -339,9 +345,9 @@ class RunnerEngine:
         config: RunnerConfig,
         variables: dict[str, str] | None = None,
     ) -> RunItemResult:
-        # Apply CSV variable substitution to a copy of the profile
-        if variables:
-            profile = self._apply_vars_to_profile(profile, variables)
+        # CSV row is the top layer, then the active environment and globals
+        layers = ([variables] if variables else []) + self._env_layers
+        profile = resolve_profile(profile, layers)
 
         timeout       = self._settings.get("default_timeout", 30.0)
         proxy_enabled = self._settings.get("proxy_enabled", False)
@@ -380,39 +386,6 @@ class RunnerEngine:
             error=response.error,
             assertion_results=assertion_results,
         )
-
-    # ------------------------------------------------------------------
-    # Variable substitution
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _substitute_vars(text: str, variables: dict[str, str]) -> str:
-        """Replace {{VarName}} placeholders with values from *variables*.
-        Unrecognised placeholders are left as-is."""
-        def _replace(match: re.Match) -> str:
-            return variables.get(match.group(1), match.group(0))
-        return re.sub(r"\{\{([^}]+)\}\}", _replace, text)
-
-    def _apply_vars_to_profile(
-        self, profile: RequestProfile, variables: dict[str, str]
-    ) -> RequestProfile:
-        """Return a shallow-copied profile with all {{var}} placeholders resolved."""
-        sub = self._substitute_vars
-        p = copy.copy(profile)
-        p.url          = sub(p.url, variables)
-        p.headers      = {k: sub(v, variables) for k, v in p.headers.items()}
-        p.params       = {k: sub(v, variables) for k, v in p.params.items()}
-        p.body_content = sub(p.body_content, variables)
-        p.body_form    = {k: sub(v, variables) for k, v in p.body_form.items()}
-        p.auth_data    = {k: sub(str(v), variables) for k, v in p.auth_data.items()}
-        p.assertions   = [
-            {
-                k: sub(v, variables) if isinstance(v, str) else v
-                for k, v in a.items()
-            }
-            for a in p.assertions
-        ]
-        return p
 
     # ------------------------------------------------------------------
     # Thread-safe UI callback

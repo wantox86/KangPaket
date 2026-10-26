@@ -7,7 +7,7 @@ from __future__ import annotations
 import customtkinter as ctk
 import tkinter as tk
 
-from app.core.postman_importer import PostmanImportResult
+from app.core.postman_importer import PostmanImportResult, has_unknown_placeholder
 from app.core.profile_manager import ProfileManager
 from app.models.request_model import RequestProfile
 from app.config import METHOD_COLORS
@@ -84,6 +84,8 @@ class PostmanImportDialog(ctk.CTkToplevel):
                 end = w.find("'", 1)
                 if end != -1:
                     self._warned_names.add(w[1:end])
+
+        self._known_vars = {v.key for v in result.variables if v.enabled}
 
         self._build()
 
@@ -343,7 +345,7 @@ class PostmanImportDialog(ctk.CTkToplevel):
     def _profile_has_warning(self, profile: RequestProfile) -> bool:
         """Check if any warning message references this profile name."""
         return profile.name in self._warned_names or bool(
-            profile.url and "{{" in profile.url
+            profile.url and has_unknown_placeholder(profile.url, self._known_vars)
         )
 
     # ------------------------------------------------------------------
