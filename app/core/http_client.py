@@ -109,7 +109,7 @@ class HttpClient:
                 status_code=0,
                 status_text="SSL ERROR",
                 timestamp=timestamp,
-                error=f"SSL error: {e}. Coba nonaktifkan Verify SSL di tab Settings.",
+                error=f"SSL error: {e}. Try disabling Verify SSL in the Settings tab.",
             )
         except Exception as e:
             return ResponseResult(

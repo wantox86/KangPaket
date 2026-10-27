@@ -112,7 +112,7 @@ def test_logout_failed_final_sync_needs_confirm_and_cancel_keeps_data(server, de
     assert out.blockers.unsynced >= 3
     assert local_names(dev) == before and dev.state.logged_in and dev.em.globals       # untouched
     assert logout_blockers_text(out.blockers).startswith(
-        "Ada perubahan yang belum tersinkron dan akan hilang. Tetap logout dan hapus data lokal?")
+        "There are changes that have not been synced and will be lost. Log out anyway and delete local data?")
 
 
 def test_logout_confirmed_wipes_even_offline_without_tombstones(server, dev):
@@ -145,7 +145,7 @@ def test_logout_unsaved_edit_needs_confirm_even_when_synced(server, dev):
     dev.login()
     out = do_logout(ctl, unsaved_edit=True)
     assert not out.done and out.blockers.unsaved_edit and not out.blockers.sync_error
-    assert "belum disimpan" in logout_blockers_text(out.blockers)
+    assert "unsaved changes" in logout_blockers_text(out.blockers)
     assert dev.state.logged_in and len(dev.pm.load_all_profiles()) == 2
     assert do_logout(ctl, unsaved_edit=True, force=True).done
     assert local_names(dev) == ([], [])
@@ -153,8 +153,8 @@ def test_logout_unsaved_edit_needs_confirm_even_when_synced(server, dev):
 
 def test_logout_text_mentions_wipe_not_keep():
     text = logout_intro_text("alice")
-    assert "dihapus dari perangkat ini" in text and "aman di server" in text and "mengunduhnya kembali" in text
-    assert "TIDAK dihapus" not in text and "digabung" not in text
+    assert "removed from this device" in text and "safe on the server" in text and "downloads it back" in text
+    assert "NOT removed" not in text and "merged" not in text
 
 
 def test_logout_preserves_non_data_settings_files(server, dev, tmp_path):
@@ -200,7 +200,7 @@ def test_different_account_after_auth_required_needs_confirm_cancel_leaks_nothin
     assert not dev.state.logged_in and dev.state.username == "alice"
     assert ("POST", "/sync/push") not in server.requests and ("GET", "/sync/pull") not in server.requests
     ok, msg = finish(ctl, ctl.cancel_switch_async)
-    assert ok is False and "dibatalkan" in msg
+    assert ok is False and "cancelled" in msg
     assert open(dev.state._path).read() == before_state          # token of bob never stored
     assert len(dev.pm.load_all_profiles()) == 2 and dev.em.globals     # alice data intact
     assert server.live("bob", "profile") == {}
@@ -276,9 +276,9 @@ def test_last_account_persisted_and_legacy_state_falls_back_to_username(tmp_path
 
 def test_account_switch_text():
     t = account_switch_text("alice", "bob")
-    assert t == ("Data lokal milik akun alice. Login sebagai bob akan menghapus data lokal itu "
-                 "(belum tersinkron bisa hilang). Lanjut?")
-    assert "belum disimpan" in account_switch_text("alice", "bob", unsaved_edit=True)
+    assert t == ("Local data belongs to account alice. Logging in as bob will delete that local data "
+                 "(anything not yet synced may be lost). Continue?")
+    assert "unsaved changes" in account_switch_text("alice", "bob", unsaved_edit=True)
 
 
 def test_logout_blockers_flags():

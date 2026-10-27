@@ -27,55 +27,55 @@ NOW = 1_700_000_000_000
 # ---------------------------------------------------------------- presenter
 
 def test_relative_time():
-    assert relative_time(None, NOW) == "belum pernah"
-    assert relative_time(NOW - 3_000, NOW) == "baru saja"
-    assert relative_time(NOW - 30_000, NOW) == "30 detik lalu"
-    assert relative_time(NOW - 5 * 60_000, NOW) == "5 menit lalu"
-    assert relative_time(NOW - 2 * 3_600_000, NOW) == "2 jam lalu"
-    assert relative_time(NOW - 3 * 86_400_000, NOW) == "3 hari lalu"
-    assert relative_time(NOW + 5000, NOW) == "baru saja"   # clock skew
+    assert relative_time(None, NOW) == "never"
+    assert relative_time(NOW - 3_000, NOW) == "just now"
+    assert relative_time(NOW - 30_000, NOW) == "30 seconds ago"
+    assert relative_time(NOW - 5 * 60_000, NOW) == "5 minutes ago"
+    assert relative_time(NOW - 2 * 3_600_000, NOW) == "2 hours ago"
+    assert relative_time(NOW - 3 * 86_400_000, NOW) == "3 days ago"
+    assert relative_time(NOW + 5000, NOW) == "just now"   # clock skew
 
 
 def test_status_view_all_phases():
     S = SyncStatus
-    assert status_view(S(SyncPhase.LOGGED_OUT), NOW).text == "Belum login"
-    assert status_view(S(SyncPhase.SYNCING), NOW).text == "Menyinkronkan..."
-    assert status_view(S(SyncPhase.AUTH_REQUIRED), NOW).text == "Perlu login ulang"
+    assert status_view(S(SyncPhase.LOGGED_OUT), NOW).text == "Not logged in"
+    assert status_view(S(SyncPhase.SYNCING), NOW).text == "Syncing..."
+    assert status_view(S(SyncPhase.AUTH_REQUIRED), NOW).text == "Please log in again"
     v = status_view(S(SyncPhase.IDLE, last_sync_at=NOW - 120_000, username="alice"), NOW)
-    assert v.text == "Tersinkron sebagai alice · 2 menit lalu" and v.level == "ok"
-    assert "menunggu" in status_view(S(SyncPhase.IDLE, username="alice"), NOW).text
-    assert status_view(S(SyncPhase.OFFLINE, retry_in=12.4), NOW).text == "Offline (coba lagi dalam 12s)"
-    assert status_view(S(SyncPhase.OFFLINE, retry_in=12.4), NOW, elapsed=20).text == "Offline (mencoba lagi…)"
+    assert v.text == "Synced as alice · 2 minutes ago" and v.level == "ok"
+    assert "waiting to sync" in status_view(S(SyncPhase.IDLE, username="alice"), NOW).text
+    assert status_view(S(SyncPhase.OFFLINE, retry_in=12.4), NOW).text == "Offline (retry in 12s)"
+    assert status_view(S(SyncPhase.OFFLINE, retry_in=12.4), NOW, elapsed=20).text == "Offline (retrying…)"
     assert status_view(S(SyncPhase.OFFLINE), NOW).text == "Offline"
-    e = status_view(S(SyncPhase.ERROR, message="Server sync sedang bermasalah.", retry_in=30), NOW)
-    assert e.text == "Error: Server sync sedang bermasalah. (coba lagi dalam 30s)" and e.level == "error"
+    e = status_view(S(SyncPhase.ERROR, message="The sync server is having problems.", retry_in=30), NOW)
+    assert e.text == "Error: The sync server is having problems. (retry in 30s)" and e.level == "error"
     long = status_view(S(SyncPhase.ERROR, message="x" * 500), NOW)
     assert len(long.text) < 100
 
 
 def test_friendly_errors():
-    assert friendly_login_error(AuthError("x")) == "Username atau password salah."
-    assert "30 detik" in friendly_login_error(RateLimited("x", retry_after=30))
-    assert "Tunggu" in friendly_login_error(RateLimited("x"))
-    assert "tidak terjangkau" in friendly_login_error(NetworkError("x"))
-    assert "bermasalah" in friendly_login_error(ServerError("x"))
-    assert friendly_login_error(RequestRejected("ditolak")) == "ditolak"
-    assert friendly_login_error(ValueError("secret detail")) == "Terjadi kesalahan tak terduga saat login."
-    assert "login ulang" in friendly_sync_error(AuthError("x"))
+    assert friendly_login_error(AuthError("x")) == "Incorrect username or password."
+    assert "30 seconds" in friendly_login_error(RateLimited("x", retry_after=30))
+    assert "Wait" in friendly_login_error(RateLimited("x"))
+    assert "unreachable" in friendly_login_error(NetworkError("x"))
+    assert "having problems" in friendly_login_error(ServerError("x"))
+    assert friendly_login_error(RequestRejected("rejected")) == "rejected"
+    assert friendly_login_error(ValueError("secret detail")) == "An unexpected error occurred during login."
+    assert "log in again" in friendly_sync_error(AuthError("x"))
     assert "offline" in friendly_sync_error(NetworkError("x"))
-    assert "tak terduga" in friendly_sync_error(KeyError("x"))
+    assert "unexpected error" in friendly_sync_error(KeyError("x"))
 
 
 def test_summary_lines():
-    assert "Belum ada" in summary_lines(None)[0]
+    assert "No sync summary" in summary_lines(None)[0]
     r = SyncResult(pulled=3, pushed=2, conflicts=1, skipped_large=["Big"], skipped_invalid=1,
                    warnings=["w1"])
     text = "\n".join(summary_lines(r))
-    for frag in ("Diterima dari server: 3", "Dikirim ke server: 2", "Konflik (versi server dipakai): 1",
-                 "terlalu besar (>256 KiB): 1 — Big", "ID tidak valid: 1", "Peringatan: w1"):
+    for frag in ("Received from server: 3", "Sent to server: 2", "Conflicts (server version used): 1",
+                 "too large (>256 KiB): 1 — Big", "invalid ID: 1", "Warning: w1"):
         assert frag in text
     many = SyncResult(warnings=[f"w{i}" for i in range(9)])
-    assert "4 peringatan lain" in "\n".join(summary_lines(many))
+    assert "4 more warnings" in "\n".join(summary_lines(many))
 
 
 def test_normalize_server_url():
@@ -123,14 +123,14 @@ def test_controller_login_failure_restores_url_and_is_friendly(server, dev):
     done, got = threading.Event(), []
     ctl.login_async("alice", "wrong-wrong", "https://other.test", lambda ok, msg: (got.append((ok, msg)), done.set()))
     wait(done)
-    assert got == [(False, "Username atau password salah.")]
+    assert got == [(False, "Incorrect username or password.")]
     assert dev.client.base_url == before and not dev.state.logged_in
     # offline
     server.down = True
     done.clear(); got.clear()
     ctl.login_async("alice", PW, "https://sync.test", lambda ok, msg: (got.append((ok, msg)), done.set()))
     wait(done)
-    assert got[0][0] is False and "tidak terjangkau" in got[0][1]
+    assert got[0][0] is False and "unreachable" in got[0][1]
 
 
 def test_controller_rejects_parallel_login(server, dev):

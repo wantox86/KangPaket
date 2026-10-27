@@ -50,12 +50,12 @@ class RequestRejected(SyncError):
 
 
 _CODE_MESSAGES = {
-    "payload_too_large": "Data yang dikirim terlalu besar.",
-    "too_many_items": "Terlalu banyak item dalam satu kiriman.",
-    "item_too_large": "Ada item yang melebihi batas ukuran 256 KiB.",
-    "invalid_id": "ID item tidak valid.",
-    "invalid_payload": "Isi item tidak valid.",
-    "rate_limited": "Terlalu banyak permintaan, coba lagi sebentar.",
+    "payload_too_large": "The data sent is too large.",
+    "too_many_items": "Too many items in one upload.",
+    "item_too_large": "An item exceeds the 256 KiB size limit.",
+    "invalid_id": "Invalid item ID.",
+    "invalid_payload": "Invalid item content.",
+    "rate_limited": "Too many requests. Try again in a moment.",
 }
 
 
@@ -145,13 +145,13 @@ class SyncClient:
                 return
             refresh = self._state.refresh_token
             if not refresh:
-                raise AuthError("Belum login.")
+                raise AuthError("Not logged in.")
             try:
                 data = self._send("POST", "/auth/refresh", json={"refresh_token": refresh})
             except AuthError:
                 self._access_token = ""
                 self._state.set_refresh_token("")
-                raise AuthError("Sesi berakhir, silakan login ulang.") from None
+                raise AuthError("Session expired. Please log in again.") from None
             self._access_token = data["access_token"]
             self._state.set_refresh_token(data["refresh_token"])
 
@@ -184,14 +184,14 @@ class SyncClient:
         try:
             resp = self._http.request(method, self.base_url + path, headers=headers, **kw)
         except httpx.TransportError as e:
-            raise NetworkError("Tidak bisa terhubung ke server sync.") from e
+            raise NetworkError("Cannot connect to the sync server.") from e
         if resp.status_code < 300:
             if resp.status_code == 204 or not resp.content:
                 return {}
             try:
                 return resp.json()
             except ValueError as e:
-                raise ServerError("Respons server tidak valid.", status=resp.status_code) from e
+                raise ServerError("Invalid server response.", status=resp.status_code) from e
         raise self._error(resp, path)
 
     @staticmethod
@@ -203,7 +203,7 @@ class SyncClient:
         status = resp.status_code
         kw = {"status": status, "code": code}
         if status == 401:
-            msg = "Username atau password salah." if path == "/auth/login" else "Sesi berakhir, silakan login ulang."
+            msg = "Incorrect username or password." if path == "/auth/login" else "Session expired. Please log in again."
             return AuthError(msg, **kw)
         if status == 429:
             try:
@@ -212,7 +212,7 @@ class SyncClient:
                 retry = 0.0
             return RateLimited(_CODE_MESSAGES["rate_limited"], retry_after=retry, **kw)
         if status == 413:
-            return PayloadTooLarge(_CODE_MESSAGES.get(code, "Data terlalu besar."), **kw)
+            return PayloadTooLarge(_CODE_MESSAGES.get(code, "Data too large."), **kw)
         if status >= 500:
-            return ServerError("Server sync sedang bermasalah.", **kw)
-        return RequestRejected(_CODE_MESSAGES.get(code, f"Permintaan ditolak ({code or status})."), **kw)
+            return ServerError("The sync server is having problems.", **kw)
+        return RequestRejected(_CODE_MESSAGES.get(code, f"Request rejected ({code or status})."), **kw)

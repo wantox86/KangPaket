@@ -70,7 +70,7 @@ class AccountSwitchRequired(SyncError):
     """
 
     def __init__(self, old_account: str, new_account: str) -> None:
-        super().__init__("Data lokal milik akun lain.")
+        super().__init__("Local data belongs to another account.")
         self.old_account = old_account
         self.new_account = new_account
 
@@ -186,7 +186,7 @@ class SyncManager:
         with self._sync_lock:
             pending, self._pending_login = self._pending_login, None
             if pending is None:
-                raise SyncError("Tidak ada login yang menunggu konfirmasi.")
+                raise SyncError("No login is waiting for confirmation.")
             try:
                 if self.state.refresh_token:
                     self.client.logout()   # revoke the previous session as well
@@ -299,7 +299,7 @@ class SyncManager:
         """Run one full sync (blocks; serialised with other syncs). Raises SyncError."""
         with self._sync_lock:
             if not self.state.logged_in:
-                raise AuthError("Belum login.")
+                raise AuthError("Not logged in.")
             self._set_status(SyncPhase.SYNCING)
             result = SyncResult()
             try:
@@ -363,7 +363,7 @@ class SyncManager:
                 try:
                     self._merge_server_item(item, result)
                 except (KeyError, TypeError, ValueError, RuntimeError) as e:
-                    result.warnings.append(f"Item {item.get('id', '?')} dilewati: data server tidak valid ({e})")
+                    result.warnings.append(f"Item {item.get('id', '?')} skipped: invalid server data ({e})")
             cursor = int(page.get("cursor", self.state.cursor))
             advanced = cursor > self.state.cursor
             self.state.cursor = max(cursor, self.state.cursor)
@@ -481,7 +481,7 @@ class SyncManager:
             size = len(m.dumps(wire["payload"]).encode("utf-8"))
             if size > m.MAX_PAYLOAD_BYTES:
                 result.skipped_large.append(label or item_id)
-                result.warnings.append(f"'{label or item_id}' dilewati: ukuran {size // 1024} KiB melebihi batas 256 KiB")
+                result.warnings.append(f"'{label or item_id}' skipped: size {size // 1024} KiB exceeds the 256 KiB limit")
                 return
             out.append((kind, item_id, wire, wire["client_updated_at"]))
 
@@ -531,7 +531,7 @@ class SyncManager:
             if len(batch) == 1:
                 kind, item_id = batch[0][0], batch[0][1]
                 result.skipped_large.append(item_id)
-                result.warnings.append(f"Item {item_id} ditolak server: {e}")
+                result.warnings.append(f"Item {item_id} rejected by server: {e}")
                 return
             mid = len(batch) // 2
             self._push_batch(batch[:mid], result)
@@ -573,7 +573,7 @@ class SyncManager:
             else:
                 known.pop(item_id, None)
         except (KeyError, TypeError, ValueError, RuntimeError) as e:
-            result.warnings.append(f"Item {item_id}: data server tidak bisa diterapkan ({e})")
+            result.warnings.append(f"Item {item_id}: server data could not be applied ({e})")
 
     # ------------------------------------------------------------------
     # Background runner
@@ -646,7 +646,7 @@ class SyncManager:
             self._failures += 1
             delay = self.backoff_delay(self._failures)
             self._backoff_until = time.monotonic() + delay
-            self._set_status(SyncPhase.ERROR, "Kesalahan tak terduga saat sync.", retry_in=delay)
+            self._set_status(SyncPhase.ERROR, "Unexpected error during sync.", retry_in=delay)
             return
         self._failures = 0
         self._backoff_until = 0.0

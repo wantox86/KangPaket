@@ -458,7 +458,7 @@ class Sidebar(ctk.CTkFrame):
         from app.ui.profile_dialog import ProfileDialog
         dialog = ProfileDialog(
             self.winfo_toplevel(),
-            title="Rename Profil",
+            title="Rename Profile",
             initial_name=profile.name,
             initial_collection=profile.collection,
             collections=self.get_collections(),
@@ -537,7 +537,7 @@ class Sidebar(ctk.CTkFrame):
         from app.ui.profile_dialog import ProfileDialog
         dialog = ProfileDialog(
             self.winfo_toplevel(),
-            title="Pindah Collection",
+            title="Move Collection",
             initial_name=profile.name,
             initial_collection=profile.collection,
             collections=self.get_collections(),

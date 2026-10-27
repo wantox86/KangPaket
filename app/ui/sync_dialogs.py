@@ -24,7 +24,7 @@ def _center(win, parent, w: int, h: int) -> None:
 
 
 class ConfirmDialog(ctk.CTkToplevel):
-    """Modal two-button confirmation (Batal / confirm_text). `.confirmed` is set when closed."""
+    """Modal two-button confirmation (Cancel / confirm_text). `.confirmed` is set when closed."""
 
     def __init__(self, parent, title: str, message: str, confirm_text: str,
                  cancel_text: str = CONFIRM_CANCEL) -> None:
@@ -72,7 +72,7 @@ class LoginDialog(ctk.CTkToplevel):
         has_unsaved_edit=None,
     ) -> None:
         super().__init__(parent)
-        self.title("Login Cloud Sync — KangPaket")
+        self.title("Cloud Sync Login — KangPaket")
         self.resizable(False, False)
         self.grab_set()
         self.focus_set()
@@ -100,7 +100,7 @@ class LoginDialog(ctk.CTkToplevel):
         ctk.CTkLabel(self, text="Login Cloud Sync", font=("Segoe UI", 15, "bold")).pack(
             anchor="w", padx=20, pady=(16, 0))
         ctk.CTkLabel(
-            self, text="Sinkronkan profile dan environment antar perangkat.",
+            self, text="Sync profiles and environments across devices.",
             font=("Segoe UI", 11), text_color="#94a3b8", anchor="w",
         ).pack(fill="x", padx=20, pady=(0, 6))
         if notice:
@@ -118,7 +118,7 @@ class LoginDialog(ctk.CTkToplevel):
         self._pass_entry.pack(fill="x", padx=20, pady=(2, 4))
 
         self._adv_btn = ctk.CTkButton(
-            self, text="▸ Lanjutan", width=90, height=22, fg_color="transparent",
+            self, text="▸ Advanced", width=90, height=22, fg_color="transparent",
             text_color=("gray30", "gray70"), hover_color=("gray85", "gray25"),
             font=("Segoe UI", 11), anchor="w", command=self._toggle_advanced,
         )
@@ -144,7 +144,7 @@ class LoginDialog(ctk.CTkToplevel):
         self._login_btn = ctk.CTkButton(btns, text="Login", width=90, command=self._submit)
         self._login_btn.pack(side="right")
         ctk.CTkButton(
-            btns, text="Batal", width=80, fg_color="transparent", border_width=1,
+            btns, text="Cancel", width=80, fg_color="transparent", border_width=1,
             text_color=("gray10", "gray90"), command=self._cancel,
         ).pack(side="right", padx=(0, 8))
 
@@ -153,10 +153,10 @@ class LoginDialog(ctk.CTkToplevel):
         self._advanced_open = not self._advanced_open
         if self._advanced_open:
             self._adv_frame.pack(fill="x", padx=20, pady=(2, 0), after=self._adv_btn)
-            self._adv_btn.configure(text="▾ Lanjutan")
+            self._adv_btn.configure(text="▾ Advanced")
         else:
             self._adv_frame.pack_forget()
-            self._adv_btn.configure(text="▸ Lanjutan")
+            self._adv_btn.configure(text="▸ Advanced")
 
     def _reset_url(self) -> None:
         self._url_var.set(self._default_url)
@@ -164,7 +164,7 @@ class LoginDialog(ctk.CTkToplevel):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self._login_btn.configure(state="disabled" if busy else "normal",
-                                  text="Memproses…" if busy else "Login")
+                                  text="Working…" if busy else "Login")
         if busy:
             self._progress.pack(fill="x", padx=20, pady=(6, 0))
             self._progress.start()
@@ -181,7 +181,7 @@ class LoginDialog(ctk.CTkToplevel):
         username = self._user_var.get().strip()
         password = self._pass_var.get()
         if not username or not password:
-            self._show_error("Username dan password wajib diisi.")
+            self._show_error("Username and password are required.")
             return
         try:
             url = normalize_server_url(self._url_var.get())
@@ -196,7 +196,7 @@ class LoginDialog(ctk.CTkToplevel):
             username, password, url, self._login_done, on_switch_required=self._switch_required)
         if not started:
             self._set_busy(False)
-            self._show_error("Login sedang berjalan, tunggu sebentar.")
+            self._show_error("Login in progress, please wait.")
 
     def _switch_required(self, old_account: str, new_account: str) -> None:
         """Login is valid but the device holds another account's data: nothing stored yet."""
@@ -207,7 +207,7 @@ class LoginDialog(ctk.CTkToplevel):
         except Exception:
             self._ctl.cancel_switch_async(lambda ok, msg: None)
             return
-        if ask_confirm(self, "Ganti akun Cloud Sync",
+        if ask_confirm(self, "Switch Cloud Sync Account",
                        account_switch_text(old_account, new_account, self._has_unsaved_edit()),
                        SWITCH_CONFIRM_YES):
             self._show_error("")
@@ -245,7 +245,7 @@ class AccountDialog(ctk.CTkToplevel):
     def __init__(self, parent, controller: SyncUiController, on_relogin, on_logged_out,
                  has_unsaved_edit=None) -> None:
         super().__init__(parent)
-        self.title("Akun Cloud Sync — KangPaket")
+        self.title("Cloud Sync Account — KangPaket")
         self.resizable(False, False)
         self.grab_set()
         self.focus_set()
@@ -275,20 +275,20 @@ class AccountDialog(ctk.CTkToplevel):
         return value
 
     def _build(self) -> None:
-        ctk.CTkLabel(self, text="Akun Cloud Sync", font=("Segoe UI", 15, "bold")).pack(
+        ctk.CTkLabel(self, text="Cloud Sync Account", font=("Segoe UI", 15, "bold")).pack(
             anchor="w", padx=20, pady=(16, 8))
         self._user_lbl = self._row("Username")
         self._url_lbl = self._row("Server")
         self._status_lbl = self._row("Status")
-        self._last_lbl = self._row("Sync terakhir")
+        self._last_lbl = self._row("Last sync")
 
         self._banner = ctk.CTkLabel(
-            self, text="Sesi berakhir. Login ulang untuk melanjutkan sinkronisasi.",
+            self, text="Session expired. Log in again to continue syncing.",
             font=("Segoe UI", 11), text_color=LEVEL_COLORS["warn"], wraplength=420,
             justify="left", anchor="w",
         )
 
-        ctk.CTkLabel(self, text="Ringkasan sync terakhir", font=("Segoe UI", 12, "bold"),
+        ctk.CTkLabel(self, text="Last sync summary", font=("Segoe UI", 12, "bold"),
                      anchor="w").pack(fill="x", padx=20, pady=(12, 2))
         self._summary = ctk.CTkTextbox(self, height=130, font=("Segoe UI", 11), wrap="word")
         self._summary.pack(fill="x", padx=20)
@@ -302,8 +302,8 @@ class AccountDialog(ctk.CTkToplevel):
         btns.pack(side="bottom", fill="x", padx=20, pady=14)
         self._sync_btn = ctk.CTkButton(btns, text="Sync Now", width=90, command=self._sync_now)
         self._sync_btn.pack(side="left")
-        self._relogin_btn = ctk.CTkButton(btns, text="Login Ulang", width=100, command=self._relogin)
-        ctk.CTkButton(btns, text="Tutup", width=70, fg_color="transparent", border_width=1,
+        self._relogin_btn = ctk.CTkButton(btns, text="Log In Again", width=100, command=self._relogin)
+        ctk.CTkButton(btns, text="Close", width=70, fg_color="transparent", border_width=1,
                       text_color=("gray10", "gray90"), command=self.destroy).pack(side="right")
         ctk.CTkButton(btns, text="Logout", width=80, fg_color="#b91c1c", hover_color="#991b1b",
                       command=self._logout).pack(side="right", padx=(0, 8))
@@ -327,7 +327,7 @@ class AccountDialog(ctk.CTkToplevel):
         self._url_lbl.configure(text=mgr.state.server_url or mgr.client.base_url)
         self._status_lbl.configure(text=view.text, text_color=LEVEL_COLORS[view.level])
         last = st.last_sync_at
-        self._last_lbl.configure(text=relative_time(last, now_ms) if last else "belum pernah")
+        self._last_lbl.configure(text=relative_time(last, now_ms) if last else "never")
 
         if st.phase == SyncPhase.AUTH_REQUIRED:
             self._banner.pack(fill="x", padx=20, pady=(8, 0), after=self._last_lbl.master)
@@ -348,12 +348,12 @@ class AccountDialog(ctk.CTkToplevel):
         if self._manual_busy:
             return
         self._manual_busy = True
-        self._action_msg.configure(text="Menyinkronkan…", text_color=LEVEL_COLORS["busy"])
+        self._action_msg.configure(text="Syncing…", text_color=LEVEL_COLORS["busy"])
         self._sync_btn.configure(state="disabled")
         started = self._ctl.sync_now_async(self._sync_done)
         if not started:
             self._manual_busy = False
-            self._action_msg.configure(text="Sinkronisasi sedang berjalan.", text_color=LEVEL_COLORS["warn"])
+            self._action_msg.configure(text="Sync already in progress.", text_color=LEVEL_COLORS["warn"])
 
     def _sync_done(self, result, message: str) -> None:
         self._manual_busy = False
@@ -365,7 +365,7 @@ class AccountDialog(ctk.CTkToplevel):
         if message:
             self._action_msg.configure(text=message, text_color=LEVEL_COLORS[LEVEL_ERROR])
         else:
-            self._action_msg.configure(text="Sinkronisasi selesai.", text_color=LEVEL_COLORS[LEVEL_OK])
+            self._action_msg.configure(text="Sync complete.", text_color=LEVEL_COLORS[LEVEL_OK])
         self.update_status()
 
     def _relogin(self) -> None:
@@ -381,12 +381,12 @@ class AccountDialog(ctk.CTkToplevel):
     def _start_logout(self, force: bool) -> None:
         self._sync_btn.configure(state="disabled")
         self._action_msg.configure(
-            text="Logout…" if force else "Menyinkronkan perubahan terakhir…",
+            text="Logout…" if force else "Syncing latest changes…",
             text_color=LEVEL_COLORS["busy"])
         started = self._ctl.logout_async(
             self._logout_done, unsaved_edit=self._has_unsaved_edit(), force=force)
         if not started:
-            self._action_msg.configure(text="Logout sedang berjalan.", text_color=LEVEL_COLORS["warn"])
+            self._action_msg.configure(text="Logout already in progress.", text_color=LEVEL_COLORS["warn"])
 
     def _logout_done(self, outcome) -> None:
         try:
@@ -405,8 +405,8 @@ class AccountDialog(ctk.CTkToplevel):
                 self._start_logout(force=True)
                 return
             self._action_msg.configure(
-                text="Logout dibatalkan. Data lokal tidak diubah.", text_color=LEVEL_COLORS["warn"])
+                text="Logout cancelled. Local data unchanged.", text_color=LEVEL_COLORS["warn"])
         else:
-            self._action_msg.configure(text=outcome.error or "Logout gagal.",
+            self._action_msg.configure(text=outcome.error or "Logout failed.",
                                        text_color=LEVEL_COLORS[LEVEL_ERROR])
         self.update_status()

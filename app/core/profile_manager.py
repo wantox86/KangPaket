@@ -71,7 +71,7 @@ class ProfileManager:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(profile.to_dict(), f, indent=2, ensure_ascii=False)
         except OSError as e:
-            raise RuntimeError(f"Gagal menyimpan profil '{profile.name}': {e}") from e
+            raise RuntimeError(f"Failed to save profile '{profile.name}': {e}") from e
         if notify:
             self._notify("save", profile.id)
 
@@ -119,7 +119,7 @@ class ProfileManager:
                     self.delete_profile(profile.id)
                     deleted_ids.append(profile.id)
                 except RuntimeError as e:
-                    print(f"[ProfileManager] Gagal hapus profil {profile.id}: {e}")
+                    print(f"[ProfileManager] Failed to delete profile {profile.id}: {e}")
         return deleted_ids
 
     def duplicate_profile(self, profile: RequestProfile) -> RequestProfile:

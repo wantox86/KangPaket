@@ -65,7 +65,7 @@ def test_network_error_on_refresh_does_not_logout_or_wipe(tmp_path, server):
 
 
 def test_refresh_401_ends_session_but_keeps_local_data(tmp_path, server):
-    """Design: a rejected refresh token = 'Sesi berakhir'. Session is dropped (login again),
+    """Design: a rejected refresh token = 'Session expired'. Session is dropped (login again),
     but local data and the account are KEPT (no wipe); only explicit Logout wipes."""
     d1 = Device(tmp_path, server)
     d1.login()
