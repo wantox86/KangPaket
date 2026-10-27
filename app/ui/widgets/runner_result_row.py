@@ -10,6 +10,7 @@ import tkinter.font as tkfont
 import customtkinter as ctk
 
 from app.config import METHOD_COLORS, status_color
+from app.core.runner_detail import build_detail_sections
 from app.models.runner_model import RunItemResult
 
 _STATUS_ICON  = {"success": "✅", "failed": "❌", "error": "⚠️",  "skipped": "⏭"}
@@ -173,6 +174,24 @@ class RunnerResultRow(ctk.CTkFrame):
             err_box.pack(fill="x")
             err_box.insert("1.0", item.error)
             err_box.configure(state="disabled")
+
+        # Request / response detail (built lazily: only when the row is expanded)
+        for title, text in build_detail_sections(item):
+            ctk.CTkLabel(
+                self._expanded_frame,
+                text=f"{title}:",
+                font=("Segoe UI", 11, "bold"),
+                anchor="w",
+            ).pack(fill="x", pady=(8, 2))
+            box = ctk.CTkTextbox(
+                self._expanded_frame,
+                font=("Courier New", 11),
+                height=70 if title != "Response body" else 160,
+                wrap="none" if title == "Response body" else "word",
+            )
+            box.pack(fill="x")
+            box.insert("1.0", text)
+            box.configure(state="disabled")   # read-only, still selectable/copyable
 
         # Assertion table
         if item.assertion_results:

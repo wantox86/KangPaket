@@ -14,6 +14,7 @@ from typing import Callable
 
 from app.core.environment_manager import EnvironmentManager
 from app.core.http_client import HttpClient
+from app.core.runner_detail import describe_request_body, truncate_text
 from app.core.settings_manager import SettingsManager
 from app.core.variable_resolver import resolve_profile
 from app.models.request_model import RequestProfile
@@ -375,10 +376,27 @@ class RunnerEngine:
         else:
             status = "success"
 
+        # Snapshot of what was actually sent (profile is already resolved here).
+        # Only URL / body / response body are kept; headers and auth are not stored.
+        try:
+            request_url = self._client.build_url(profile)
+        except Exception:
+            request_url = profile.url
+        content_type = ""
+        for k, v in (response.headers or {}).items():
+            if k.lower() == "content-type":
+                content_type = v
+                break
+
         return RunItemResult(
             profile_id=profile.id,
             profile_name=profile.name,
             iteration=iteration,
+            method=profile.method.upper(),
+            request_url=request_url,
+            request_body=truncate_text(describe_request_body(profile)),
+            response_body=None if response.is_error else truncate_text(response.body),
+            response_content_type=content_type,
             status=status,
             status_code=response.status_code if not response.is_error else None,
             elapsed_ms=response.elapsed_ms if not response.is_error else None,

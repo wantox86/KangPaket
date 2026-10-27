@@ -55,7 +55,7 @@ class HttpClient:
             ) as client:
                 response = client.request(
                     method=profile.method.upper(),
-                    url=self._build_url(profile),
+                    url=self.build_url(profile),
                     headers=headers,
                     auth=auth,
                     content=content,
@@ -123,7 +123,7 @@ class HttpClient:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_url(self, profile: RequestProfile) -> str:
+    def build_url(self, profile: RequestProfile) -> str:
         url = profile.url.strip()
         if not url.startswith(("http://", "https://")):
             url = "https://" + url

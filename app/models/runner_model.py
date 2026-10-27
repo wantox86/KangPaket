@@ -38,6 +38,14 @@ class RunItemResult:
     error: str | None = None
     assertion_results: list[dict] = field(default_factory=list)
     timestamp: str = field(default_factory=_now_iso)
+    # Request/response detail (shown when a result row is expanded). The bodies are
+    # truncated to MAX_DETAIL_BYTES by the engine; all default to empty so results
+    # created without detail (skipped items, older code paths) keep working.
+    method: str = ""
+    request_url: str = ""               # final URL after {{var}} resolution, incl. query params
+    request_body: str | None = None     # resolved body that was sent (None = no body)
+    response_body: str | None = None
+    response_content_type: str = ""
 
 
 @dataclass
