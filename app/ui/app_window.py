@@ -874,7 +874,7 @@ class _AboutDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             self,
-            text="Built for internal use.\nA lightweight, offline Postman alternative.",
+            text="A lightweight, offline Postman alternative.",
             font=("Segoe UI", 11), text_color="#64748b", justify="center",
         ).pack(pady=(0, 4))
 

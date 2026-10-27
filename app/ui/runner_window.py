@@ -17,6 +17,7 @@ from app.core.http_client import HttpClient
 from app.core.profile_manager import ProfileManager
 from app.core.environment_manager import EnvironmentManager
 from app.core.runner_engine import RunnerEngine
+from app.core.runner_state import RunCounters
 from app.core.settings_manager import SettingsManager
 from app.models.request_model import RequestProfile
 from app.models.runner_model import RunnerConfig, RunItemResult, RunnerResult
@@ -57,12 +58,7 @@ class RunnerWindow(ctk.CTkToplevel):
         self._flush_job: str | None = None
 
         # Running counters — avoid O(n) scan on every progress callback
-        self._count_passed  = 0
-        self._count_failed  = 0
-        self._count_errors  = 0
-        self._count_skipped = 0
-        self._count_done    = 0
-        self._count_total   = 0
+        self._counters = RunCounters()
 
         # Max result rows rendered; beyond this only counters update. Each row is
         # a CTkFrame + one canvas (collapsed line drawn as canvas items). Cost is
@@ -268,7 +264,16 @@ class RunnerWindow(ctk.CTkToplevel):
             command=self._export_results,
             state="disabled",
         )
-        self._export_btn.pack(side="left")
+        self._export_btn.pack(side="left", padx=(0, 8))
+
+        self._clear_btn = ctk.CTkButton(
+            btn_row, text="Clear Results", width=110, height=34,
+            font=("Segoe UI", 12),
+            fg_color="#374151", hover_color="#7f1d1d",
+            command=self._clear_results,
+            state="disabled",
+        )
+        self._clear_btn.pack(side="left")
 
     # ---- Progress panel ----
 
@@ -444,41 +449,12 @@ class RunnerWindow(ctk.CTkToplevel):
             run_mode=self._mode_var.get(),
         )
 
-        # Clear previous results
-        for widget in self._results_scroll.winfo_children():
-            widget.destroy()
-        self.update_idletasks()
-        self._result_rows.clear()
-        self._runner_result = None
-
-        # Reset counters
-        self._count_passed  = 0
-        self._count_failed  = 0
-        self._count_errors  = 0
-        self._count_skipped = 0
-        self._count_done    = 0
-        self._count_total   = len(selected) * iters
-
-        # Drain any leftover items from a previous run
-        while not self._result_queue.empty():
-            try:
-                self._result_queue.get_nowait()
-            except queue.Empty:
-                break
-
-        # Update counters
-        total = self._count_total
-        self._progress_bar.set(0)
-        self._prog_label.configure(text=f"0 / {total}")
-        self._passed_label.configure(text="✅ 0")
-        self._failed_label.configure(text="❌ 0")
-        self._error_label.configure(text="⚠ 0")
-        self._skip_label.configure(text="⏭ 0")
-        self._elapsed_label.configure(text="")
+        self._reset_results(total=len(selected) * iters)
 
         self._run_btn.configure(state="disabled")
         self._stop_btn.configure(state="normal")
         self._export_btn.configure(state="disabled")
+        self._clear_btn.configure(state="disabled")
         self._running = True
         self._start_time = time.monotonic()
         self._tick_elapsed()
@@ -493,6 +469,42 @@ class RunnerWindow(ctk.CTkToplevel):
             on_finished=lambda r: self.after(0, self._on_finished, r),
             csv_data=csv_data,
         )
+
+    def _reset_results(self, total: int = 0) -> None:
+        """Drop all result rows, queued items, counters and summary labels."""
+        if self._flush_job is not None:
+            self.after_cancel(self._flush_job)
+            self._flush_job = None
+        for widget in self._results_scroll.winfo_children():
+            widget.destroy()
+        self.update_idletasks()
+        self._result_rows.clear()
+        self._runner_result = None
+        self._counters.reset(total)
+
+        # Drain any leftover items from a previous run
+        while not self._result_queue.empty():
+            try:
+                self._result_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        self._progress_bar.set(0)
+        self._prog_label.configure(text=f"0 / {total}")
+        self._passed_label.configure(text="✅ 0")
+        self._failed_label.configure(text="❌ 0")
+        self._error_label.configure(text="⚠ 0")
+        self._skip_label.configure(text="⏭ 0")
+        self._elapsed_label.configure(text="")
+        self._results_scroll._parent_canvas.yview_moveto(0)
+
+    def _clear_results(self) -> None:
+        """Clear Results button: back to the pre-run state. No-op while running."""
+        if self._running:
+            return
+        self._reset_results(total=0)
+        self._export_btn.configure(state="disabled")
+        self._clear_btn.configure(state="disabled")
 
     def _stop_run(self) -> None:
         self._engine.stop()
@@ -527,16 +539,7 @@ class RunnerWindow(ctk.CTkToplevel):
             except queue.Empty:
                 break
 
-            # Update running counters
-            self._count_done += 1
-            if item.status == "success":
-                self._count_passed += 1
-            elif item.status == "failed":
-                self._count_failed += 1
-            elif item.status == "error":
-                self._count_errors += 1
-            elif item.status == "skipped":
-                self._count_skipped += 1
+            self._counters.add(item.status)
 
             # Only create widgets up to the render limit
             if len(self._result_rows) < self._MAX_RENDERED_ROWS:
@@ -565,15 +568,14 @@ class RunnerWindow(ctk.CTkToplevel):
 
         # Refresh progress labels once per flush (not per item)
         if processed > 0:
-            done  = self._count_done
-            total = self._count_total
-            pct   = done / total if total > 0 else 0
+            c = self._counters
+            pct = c.done / c.total if c.total > 0 else 0
             self._progress_bar.set(pct)
-            self._prog_label.configure(text=f"{done} / {total}")
-            self._passed_label.configure(text=f"✅ {self._count_passed}")
-            self._failed_label.configure(text=f"❌ {self._count_failed}")
-            self._error_label.configure(text=f"⚠ {self._count_errors}")
-            self._skip_label.configure(text=f"⏭ {self._count_skipped}")
+            self._prog_label.configure(text=f"{c.done} / {c.total}")
+            self._passed_label.configure(text=f"✅ {c.passed}")
+            self._failed_label.configure(text=f"❌ {c.failed}")
+            self._error_label.configure(text=f"⚠ {c.errors}")
+            self._skip_label.configure(text=f"⏭ {c.skipped}")
 
         # Keep flushing while running or while queue still has items
         if self._running or not self._result_queue.empty():
@@ -597,6 +599,7 @@ class RunnerWindow(ctk.CTkToplevel):
         self._run_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
         self._export_btn.configure(state="normal")
+        self._clear_btn.configure(state="normal")
         if self._elapsed_job:
             self.after_cancel(self._elapsed_job)
         elapsed_s = result.total_elapsed_ms / 1000
