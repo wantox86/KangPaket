@@ -1,7 +1,7 @@
 """
 KangPaket — Cloud Sync presentation helpers (pure logic, no widgets).
 
-Turns SyncStatus / SyncResult / exceptions into user-facing Indonesian text, and holds the
+Turns SyncStatus / SyncResult / exceptions into user-facing English text, and holds the
 small decision logic the UI uses, so all of it can be unit-tested without a display.
 """
 from __future__ import annotations
@@ -39,19 +39,19 @@ class StatusView:
 
 
 def relative_time(ts_ms: int | None, now_ms: int) -> str:
-    """'baru saja' / '5 menit lalu' / '2 jam lalu' / '3 hari lalu'."""
+    """'just now' / '5 minutes ago' / '2 hours ago' / '3 days ago'."""
     if not ts_ms:
-        return "belum pernah"
+        return "never"
     seconds = max(0, (now_ms - ts_ms) // 1000)
     if seconds < 10:
-        return "baru saja"
+        return "just now"
     if seconds < 60:
-        return f"{seconds} detik lalu"
+        return f"{seconds} seconds ago"
     if seconds < 3600:
-        return f"{seconds // 60} menit lalu"
+        return f"{seconds // 60} minutes ago"
     if seconds < 86400:
-        return f"{seconds // 3600} jam lalu"
-    return f"{seconds // 86400} hari lalu"
+        return f"{seconds // 3600} hours ago"
+    return f"{seconds // 86400} days ago"
 
 
 def _shorten(text: str, limit: int = MAX_STATUS_MESSAGE) -> str:
@@ -63,85 +63,85 @@ def _retry_text(retry_in: float | None, elapsed: float) -> str:
     if retry_in is None:
         return ""
     remaining = int(round(retry_in - elapsed))
-    return f" (coba lagi dalam {remaining}s)" if remaining > 0 else " (mencoba lagi…)"
+    return f" (retry in {remaining}s)" if remaining > 0 else " (retrying…)"
 
 
 def status_view(status: SyncStatus, now_ms: int, elapsed: float = 0.0) -> StatusView:
     """Compact one-line status. `elapsed` = seconds since `status` was received (retry countdown)."""
     phase = status.phase
     if phase == SyncPhase.LOGGED_OUT:
-        return StatusView("Belum login", LEVEL_MUTED)
+        return StatusView("Not logged in", LEVEL_MUTED)
     if phase == SyncPhase.SYNCING:
-        return StatusView("Menyinkronkan...", LEVEL_BUSY)
+        return StatusView("Syncing...", LEVEL_BUSY)
     if phase == SyncPhase.AUTH_REQUIRED:
-        return StatusView("Perlu login ulang", LEVEL_WARN)
+        return StatusView("Please log in again", LEVEL_WARN)
     if phase == SyncPhase.OFFLINE:
         text = "Offline" + _retry_text(status.retry_in, elapsed)
         return StatusView(text, LEVEL_WARN)
     if phase == SyncPhase.ERROR:
-        msg = _shorten(status.message) or "sinkronisasi gagal"
+        msg = _shorten(status.message) or "sync failed"
         return StatusView(f"Error: {msg}" + _retry_text(status.retry_in, elapsed), LEVEL_ERROR)
     # IDLE
     if status.last_sync_at:
         return StatusView(
-            f"Tersinkron sebagai {status.username} · {relative_time(status.last_sync_at, now_ms)}",
+            f"Synced as {status.username} · {relative_time(status.last_sync_at, now_ms)}",
             LEVEL_OK,
         )
-    return StatusView(f"Masuk sebagai {status.username} · menunggu sinkronisasi", LEVEL_MUTED)
+    return StatusView(f"Logged in as {status.username} · waiting to sync", LEVEL_MUTED)
 
 
 def friendly_login_error(exc: BaseException) -> str:
     """Message for the login dialog."""
     if isinstance(exc, AuthError):
-        return "Username atau password salah."
+        return "Incorrect username or password."
     if isinstance(exc, RateLimited):
         wait = int(exc.retry_after) if exc.retry_after else 0
-        suffix = f" Coba lagi dalam {wait} detik." if wait > 0 else " Tunggu sebentar lalu coba lagi."
-        return "Terlalu banyak percobaan login." + suffix
+        suffix = f" Try again in {wait} seconds." if wait > 0 else " Wait a moment and try again."
+        return "Too many login attempts." + suffix
     if isinstance(exc, NetworkError):
-        return ("Server tidak terjangkau. Periksa koneksi internet, "
-                "atau Server URL di bagian Lanjutan.")
+        return ("Server unreachable. Check your internet connection, "
+                "or the Server URL under Advanced.")
     if isinstance(exc, ServerError):
-        return "Server sync sedang bermasalah. Coba lagi nanti."
+        return "The sync server is having problems. Try again later."
     if isinstance(exc, SyncError):
-        return str(exc) or "Login gagal."
-    return "Terjadi kesalahan tak terduga saat login."
+        return str(exc) or "Login failed."
+    return "An unexpected error occurred during login."
 
 
 def friendly_sync_error(exc: BaseException) -> str:
     """Message for a manual 'Sync Now' failure."""
     if isinstance(exc, AuthError):
-        return "Sesi berakhir, silakan login ulang."
+        return "Session expired. Please log in again."
     if isinstance(exc, NetworkError):
-        return "Tidak bisa terhubung ke server sync (offline). Akan dicoba lagi otomatis."
+        return "Cannot connect to the sync server (offline). Will retry automatically."
     if isinstance(exc, RateLimited):
-        return "Terlalu banyak permintaan, coba lagi sebentar."
+        return "Too many requests. Try again in a moment."
     if isinstance(exc, SyncError):
-        return str(exc) or "Sinkronisasi gagal."
-    return "Terjadi kesalahan tak terduga saat sinkronisasi."
+        return str(exc) or "Sync failed."
+    return "An unexpected error occurred during sync."
 
 
 def summary_lines(result: SyncResult | None) -> list[str]:
     """Human-readable summary of the last sync cycle (one item per line)."""
     if result is None:
-        return ["Belum ada ringkasan sinkronisasi pada sesi ini."]
+        return ["No sync summary yet in this session."]
     lines = [
-        f"Diterima dari server: {result.pulled}",
-        f"Dikirim ke server: {result.pushed}",
-        f"Konflik (versi server dipakai): {result.conflicts}",
+        f"Received from server: {result.pulled}",
+        f"Sent to server: {result.pushed}",
+        f"Conflicts (server version used): {result.conflicts}",
     ]
     if result.skipped_large:
         names = ", ".join(result.skipped_large[:5])
-        more = f" (+{len(result.skipped_large) - 5} lainnya)" if len(result.skipped_large) > 5 else ""
-        lines.append(f"Dilewati karena terlalu besar (>256 KiB): {len(result.skipped_large)} — {names}{more}")
+        more = f" (+{len(result.skipped_large) - 5} more)" if len(result.skipped_large) > 5 else ""
+        lines.append(f"Skipped because too large (>256 KiB): {len(result.skipped_large)} — {names}{more}")
     else:
-        lines.append("Dilewati karena terlalu besar: 0")
+        lines.append("Skipped because too large: 0")
     if result.skipped_invalid:
-        lines.append(f"Dilewati karena ID tidak valid: {result.skipped_invalid}")
+        lines.append(f"Skipped because of invalid ID: {result.skipped_invalid}")
     for w in result.warnings[:5]:
-        lines.append(f"Peringatan: {w}")
+        lines.append(f"Warning: {w}")
     if len(result.warnings) > 5:
-        lines.append(f"…dan {len(result.warnings) - 5} peringatan lain")
+        lines.append(f"…and {len(result.warnings) - 5} more warnings")
     return lines
 
 
@@ -149,10 +149,10 @@ def normalize_server_url(url: str) -> str:
     """Validate/normalise a user-entered server URL. Raises ValueError with a friendly message."""
     url = (url or "").strip().rstrip("/")
     if not url:
-        raise ValueError("Server URL tidak boleh kosong.")
+        raise ValueError("Server URL cannot be empty.")
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("Server URL harus diawali http:// atau https:// dan berisi host.")
+        raise ValueError("Server URL must start with http:// or https:// and include a host.")
     return url
 
 
@@ -204,21 +204,21 @@ class LogoutBlockers:
 
 
 LOGOUT_TITLE = "Logout Cloud Sync"
-LOGOUT_CONFIRM_QUESTION = "Ada perubahan yang belum tersinkron dan akan hilang. Tetap logout dan hapus data lokal?"
-LOGOUT_CONFIRM_YES = "Tetap logout"
-SWITCH_CONFIRM_YES = "Lanjut"
-CONFIRM_CANCEL = "Batal"
+LOGOUT_CONFIRM_QUESTION = "There are changes that have not been synced and will be lost. Log out anyway and delete local data?"
+LOGOUT_CONFIRM_YES = "Log out anyway"
+SWITCH_CONFIRM_YES = "Continue"
+CONFIRM_CANCEL = "Cancel"
 
 
 def logout_intro_text(username: str) -> str:
     """First dialog: explains what logout does (it clears local data, like Postman)."""
     return (
-        f"Keluar dari akun '{username or 'ini'}'?\n\n"
-        "• Perubahan terakhir disinkronkan ke server lebih dulu.\n"
-        "• Profile dan environment dihapus dari perangkat ini. Data tetap aman di server; "
-        "login lagi akan mengunduhnya kembali.\n"
-        "• Sinkronisasi otomatis berhenti dan sesi di perangkat ini dihapus.\n"
-        "• Pengaturan aplikasi (tema, Server URL, dll.) tidak dihapus."
+        f"Log out of account '{username or 'this account'}'?\n\n"
+        "• Your latest changes are synced to the server first.\n"
+        "• Profiles and environments are removed from this device. Your data stays safe on the server; "
+        "logging in again downloads it back.\n"
+        "• Automatic sync stops and the session on this device is removed.\n"
+        "• App settings (theme, Server URL, etc.) are not removed."
     )
 
 
@@ -226,23 +226,23 @@ def logout_blockers_text(b: LogoutBlockers) -> str:
     """Second dialog, shown only when something would be lost."""
     lines = [LOGOUT_CONFIRM_QUESTION, ""]
     if b.sync_error:
-        lines.append(f"• Sinkronisasi terakhir gagal: {_shorten(b.sync_error, 120)}")
+        lines.append(f"• The last sync failed: {_shorten(b.sync_error, 120)}")
     if b.unsynced:
-        lines.append(f"• {b.unsynced} item belum terkirim ke server.")
+        lines.append(f"• {b.unsynced} item(s) have not been sent to the server.")
     if b.skipped_large:
         names = ", ".join(b.skipped_large[:5])
-        more = f" (+{len(b.skipped_large) - 5} lainnya)" if len(b.skipped_large) > 5 else ""
-        lines.append(f"• Terlalu besar untuk disinkronkan (>256 KiB): {names}{more}")
+        more = f" (+{len(b.skipped_large) - 5} more)" if len(b.skipped_large) > 5 else ""
+        lines.append(f"• Too large to sync (>256 KiB): {names}{more}")
     if b.unsaved_edit:
-        lines.append("• Ada request yang sedang diedit dan belum disimpan.")
+        lines.append("• A request being edited has unsaved changes.")
     return "\n".join(lines)
 
 
 def account_switch_text(old_account: str, new_account: str, unsaved_edit: bool = False) -> str:
     text = (
-        f"Data lokal milik akun {old_account}. Login sebagai {new_account} akan menghapus "
-        "data lokal itu (belum tersinkron bisa hilang). Lanjut?"
+        f"Local data belongs to account {old_account}. Logging in as {new_account} will delete "
+        "that local data (anything not yet synced may be lost). Continue?"
     )
     if unsaved_edit:
-        text += "\n\nRequest yang sedang diedit dan belum disimpan juga akan hilang."
+        text += "\n\nThe request being edited, with its unsaved changes, will also be lost."
     return text

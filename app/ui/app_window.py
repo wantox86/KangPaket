@@ -104,7 +104,7 @@ class AppWindow:
 
         # Cloud Sync account entry (left side of the top bar)
         self._sync_btn = ctk.CTkButton(
-            topbar, text="☁  Belum login", height=24, width=160, anchor="w",
+            topbar, text="☁  Not logged in", height=24, width=160, anchor="w",
             font=("Segoe UI", 12), fg_color="transparent", hover_color=("gray85", "gray25"),
             text_color=LEVEL_COLORS["muted"], command=self._open_account,
         )
@@ -195,7 +195,7 @@ class AppWindow:
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Collection Runner", command=self._open_runner)
         tools_menu.add_command(label="Environments…", command=self._open_environments)
-        tools_menu.add_command(label="Akun Cloud Sync…", command=self._open_account)
+        tools_menu.add_command(label="Cloud Sync Account…", command=self._open_account)
         tools_menu.add_separator()
         tools_menu.add_command(
             label="Clear Response", command=self._clear_response, accelerator="Ctrl+L"
@@ -656,7 +656,7 @@ class AppWindow:
             except tk.TclError:
                 pass
         self._status_bar.set_text(
-            f"Cloud Sync: {result.applied_local} diperbarui, {result.deleted_local} dihapus dari server."
+            f"Cloud Sync: {result.applied_local} updated, {result.deleted_local} deleted from server."
         )
         self._reconcile_open_profile()   # may override the status text with a warning
 
@@ -672,21 +672,21 @@ class AppWindow:
         )
         if action == ACTION_RELOAD and disk is not None:
             rp.load_profile(disk, is_saved=True)
-            self._status_bar.set_text(f"Cloud Sync: '{disk.name}' diperbarui dari server.")
+            self._status_bar.set_text(f"Cloud Sync: '{disk.name}' updated from server.")
         elif action == ACTION_CLOSE:
             self._new_request()
-            self._status_bar.set_text("Cloud Sync: request yang dibuka dihapus dari server.")
+            self._status_bar.set_text("Cloud Sync: the open request was deleted from the server.")
         elif action == ACTION_WARN_CHANGED:
             rp.loaded_updated_at = disk.updated_at if disk else rp.loaded_updated_at
             self._status_bar.set_error(
-                "Cloud Sync: profile yang sedang diedit berubah di server. Edit Anda tidak ditimpa; "
-                "menyimpan akan menggantikan versi server."
+                "Cloud Sync: the profile being edited changed on the server. Your edits were not overwritten; "
+                "saving will replace the server version."
             )
         elif action == ACTION_WARN_DELETED:
             rp.loaded_updated_at = None
             self._status_bar.set_error(
-                "Cloud Sync: profile yang sedang diedit dihapus di server. Edit Anda masih ada; "
-                "simpan untuk membuatnya lagi."
+                "Cloud Sync: the profile being edited was deleted on the server. Your edits are still here; "
+                "save to recreate it."
             )
 
     def _open_account(self) -> None:
@@ -724,13 +724,13 @@ class AppWindow:
             username=username, notice=notice,
             has_unsaved_edit=self._has_unsaved_edit,
             on_success=lambda: self._status_bar.set_text(
-                "Login berhasil. Menyinkronkan data pertama kali…"),
+                "Login successful. Running first sync…"),
         )
 
     def _open_login_relogin(self) -> None:
         self._open_login(
             username=self._sync_state.username,
-            notice="Sesi berakhir. Masukkan password untuk login ulang.",
+            notice="Session expired. Enter your password to log in again.",
         )
 
     def _has_unsaved_edit(self) -> bool:
@@ -751,7 +751,7 @@ class AppWindow:
     def _on_logged_out(self) -> None:
         self._render_sync_status()
         self._status_bar.set_text(
-            "Logout Cloud Sync. Profile dan environment dihapus dari perangkat ini (data tetap di server).")
+            "Logged out of Cloud Sync. Profiles and environments were removed from this device (data stays on the server).")
 
     def _on_close(self) -> None:
         """Stop the sync runner (briefly) and close; never hangs on an in-flight request."""
@@ -789,7 +789,7 @@ class _ErrorDialog(ctk.CTkToplevel):
         ).pack(padx=20, pady=(16, 4))
 
         ctk.CTkLabel(
-            self, text="Detail error:",
+            self, text="Error details:",
             font=("Segoe UI", 11), text_color="#888", anchor="w",
         ).pack(fill="x", padx=20, pady=(4, 2))
 

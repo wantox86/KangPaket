@@ -67,7 +67,7 @@ class SyncUiController:
                 if on_switch_required is None:
                     self.manager.cancel_account_switch()
                     client.base_url = previous_url
-                    self._dispatch(lambda: on_done(False, "Login dibatalkan."))
+                    self._dispatch(lambda: on_done(False, "Login cancelled."))
                 else:
                     self._switch_previous_url = previous_url
                     old, new = e.old_account, e.new_account
@@ -128,7 +128,7 @@ class SyncUiController:
             except Exception as e:
                 print(f"[SyncUiController] cancel switch failed: {e}")
             self.manager.client.base_url = self._switch_previous_url or self.manager.client.base_url
-            self._dispatch(lambda: on_done(False, "Login dibatalkan. Data lokal tidak diubah."))
+            self._dispatch(lambda: on_done(False, "Login cancelled. Local data unchanged."))
 
         self._spawn("kangpaket-switch-cancel", work)
 
@@ -172,5 +172,5 @@ class SyncUiController:
             self.manager.logout_and_wipe()
         except Exception as e:
             print(f"[SyncUiController] logout failed: {e}")
-            return LogoutOutcome(False, error="Logout gagal. Data lokal tidak diubah sepenuhnya; coba lagi.")
+            return LogoutOutcome(False, error="Logout failed. Local data was not fully cleared; try again.")
         return LogoutOutcome(True)
