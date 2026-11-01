@@ -588,6 +588,38 @@ class RequestPanel(ctk.CTkFrame):
             verify_ssl=self._verify_ssl_var.get(),
         )
 
+    def snapshot_profile(self) -> RequestProfile:
+        """Read-only snapshot of the current UI state for the code preview.
+
+        Unlike get_current_profile() this never mutates the headers editor (which
+        injects the raw Content-Type on read), so it is safe to poll on a timer.
+        """
+        auth_type = self._auth_type_var.get()
+        auth_data = self._collect_auth_data(auth_type)
+
+        body_type = self._body_type_var.get()
+        body_content = ""
+        if body_type == "raw":
+            body_content = self._body_raw_text.get("1.0", "end-1c")
+
+        params = self._params_editor.get_data()
+        if auth_type == "api-key" and self._apikey_in_var.get() == "query param":
+            params[self._apikey_name_var.get() or "api_key"] = self._apikey_value_var.get()
+
+        return RequestProfile(
+            name="Untitled",
+            url=self._url_var.get().strip(),
+            method=self._method_var.get(),
+            headers=self._headers_editor.get_data(),
+            params=params,
+            body_type=body_type,
+            body_content=body_content,
+            body_form=self._body_form_editor.get_data(),
+            auth_type=auth_type,
+            auth_data=auth_data,
+            assertions=self._assertions_editor.get_data(),
+        )
+
     def _collect_auth_data(self, auth_type: str) -> dict[str, str]:
         if auth_type == "bearer":
             return {"token": self._bearer_token_var.get()}

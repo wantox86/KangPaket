@@ -27,6 +27,7 @@ from app.models.response_model import ResponseResult
 from app.ui.sidebar import Sidebar
 from app.ui.request_panel import RequestPanel
 from app.ui.response_panel import ResponsePanel
+from app.ui.code_preview_panel import CodePreviewPanel
 from app.ui.widgets.status_bar import StatusBar
 
 
@@ -144,7 +145,7 @@ class AppWindow:
             sashrelief=tk.FLAT, sashwidth=4,
             bg="#1a1a2e",
         )
-        self._paned.pack(fill="both", expand=True)
+        self._paned.pack(side="left", fill="both", expand=True)
 
         self._request_panel = RequestPanel(
             self._paned,
@@ -161,6 +162,15 @@ class AppWindow:
         self._paned.add(self._response_panel, minsize=160)
 
         self._root.after(100, lambda: self._paned.sash_place(0, 0, 340))
+
+        # Code preview panel (right side, beside request/response)
+        self._code_preview = CodePreviewPanel(
+            right,
+            settings=self._settings,
+            environments=self._environments,
+            request_panel=self._request_panel,
+        )
+        self._code_preview.pack(side="left", fill="y")
 
     # ------------------------------------------------------------------
     # Menu
@@ -224,6 +234,11 @@ class AppWindow:
         self._root.bind("<Control-comma>",  lambda _: self._open_settings())
         self._root.bind("<Control-e>",      lambda _: self._export_profiles())
         self._root.bind("<Control-l>",      lambda _: self._response_panel.clear())
+        # Code preview toggle: Ctrl/Cmd + Alt + C
+        self._root.bind("<Control-Alt-c>",  lambda _: self._code_preview.toggle())
+        self._root.bind("<Control-Alt-C>",  lambda _: self._code_preview.toggle())
+        self._root.bind("<Command-Alt-c>",  lambda _: self._code_preview.toggle())
+        self._root.bind("<Command-Alt-C>",  lambda _: self._code_preview.toggle())
 
     # ------------------------------------------------------------------
     # Profile actions
