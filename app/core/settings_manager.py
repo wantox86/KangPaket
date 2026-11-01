@@ -17,6 +17,10 @@ DEFAULT_SETTINGS: dict = {
     "proxy_enabled": False,
     "proxy_http": "",
     "proxy_https": "",
+    "code_preview_collapsed": True,
+    "code_preview_width": 380,
+    "code_preview_language": "curl",
+    "code_preview_resolve": False,
 }
 
 
