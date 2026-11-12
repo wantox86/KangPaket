@@ -20,7 +20,8 @@ Total time is roughly 5-7 minutes once the Docker images are cached.
 1. Work from a **fresh clone** in a temporary directory, check out the target tag/branch/SHA and record the SHA.
 2. Confirm the version number in `app/version.py` and `pyproject.toml` is the intended one.
 3. Build exactly what is checked in: do not change code or version during a release build, and do not push.
-4. Run the test suite: `python -m pytest -q` (inside a venv with `requirements.txt` installed).
+4. Run the test suite inside a venv with `requirements.txt` installed. `requirements.txt` does **not** include pytest, so install it first:
+   `pip install pytest && python -m pytest -q`.
 
 ## 3. Build
 
